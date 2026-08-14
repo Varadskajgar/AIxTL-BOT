@@ -8,112 +8,253 @@ const {
 } = require("discord.js");
 
 // ======================================================
-// Helpers
+// SMALL-CAP / FANCY UNICODE → NORMAL LETTERS
 // ======================================================
 
-function getTargetChannels(guild) {
-  return [...guild.channels.cache.values()].filter(channel => {
-    // NEVER include categories when target is channel
-    return (
-      channel.type !== ChannelType.GuildCategory &&
-      typeof channel.setName === "function" &&
-      channel.name
-    );
-  });
-}
+const fancyMap = {
+  "ᴀ": "a",
+  "ʙ": "b",
+  "ᴄ": "c",
+  "ᴅ": "d",
+  "ᴇ": "e",
+  "ғ": "f",
+  "ɢ": "g",
+  "ʜ": "h",
+  "ɪ": "i",
+  "ᴊ": "j",
+  "ᴋ": "k",
+  "ʟ": "l",
+  "ᴍ": "m",
+  "ɴ": "n",
+  "ᴏ": "o",
+  "ᴘ": "p",
+  "ǫ": "q",
+  "ʀ": "r",
+  "ᴛ": "t",
+  "ᴜ": "u",
+  "ᴠ": "v",
+  "ᴡ": "w",
+  "x": "x",
+  "ʏ": "y",
+  "ᴢ": "z",
 
-function getTargetCategories(guild) {
-  return [...guild.channels.cache.values()].filter(channel => {
-    return (
-      channel.type === ChannelType.GuildCategory &&
-      typeof channel.setName === "function" &&
-      channel.name
-    );
-  });
-}
+  "ᵃ": "a",
+  "ᵇ": "b",
+  "ᶜ": "c",
+  "ᵈ": "d",
+  "ᵉ": "e",
+  "ᶠ": "f",
+  "ᵍ": "g",
+  "ʰ": "h",
+  "ⁱ": "i",
+  "ʲ": "j",
+  "ᵏ": "k",
+  "ˡ": "l",
+  "ᵐ": "m",
+  "ⁿ": "n",
+  "ᵒ": "o",
+  "ᵖ": "p",
+  "ʳ": "r",
+  "ˢ": "s",
+  "ᵗ": "t",
+  "ᵘ": "u",
+  "ᵛ": "v",
+  "ʷ": "w",
+  "ˣ": "x",
+  "ʸ": "y",
+  "ᶻ": "z"
+};
 
-// Remove decorative styling while keeping the meaningful name.
+// ======================================================
+// SIMPLE NAME
+//
+// "simple" = ONLY normal readable words
+//
+// Examples:
+//
+// 〢ᴏᴡᴏ              → owo
+// 〢ᴀᴄʜɪᴠᴇᴍᴇɴᴛs    → achievements
+// 🎮・ɢᴀᴍɪɴɢ ᴠᴄ    → gaming vc
+// 「🔥」Rules        → rules
+// ━━ GENERAL ━━     → general
+//
+// Numbers are also kept.
+// ======================================================
+
 function makeSimpleName(name) {
-  let result = name;
 
-  // Remove emojis
+  let result = String(name || "");
+
+  // ------------------------------------------
+  // Convert fancy Unicode letters
+  // ------------------------------------------
+
   result = result.replace(
-    /[\p{Extended_Pictographic}\p{Emoji_Presentation}\p{Emoji_Modifier_Base}\p{Emoji_Modifier}]/gu,
-    ""
+    /[ᴀ-ᴢǫʀᵃ-ᶻ]/gu,
+    char => fancyMap[char] || char
   );
 
-  // Remove common decorative characters from beginning/end
-  result = result.replace(
-    /^[\s\-_+=|•●○◆◇★☆✦✧✿❖「」『』【】〔〕《》〈〉╭╮╯╰┌┐└┘┃│║]+/u,
-    ""
-  );
+  // ------------------------------------------
+  // Lowercase
+  // ------------------------------------------
+
+  result = result.toLowerCase();
+
+  // ------------------------------------------
+  // Keep ONLY:
+  //
+  // a-z
+  // 0-9
+  // spaces
+  //
+  // Everything else is removed.
+  // ------------------------------------------
 
   result = result.replace(
-    /[\s\-_+=|•●○◆◇★☆✦✧✿❖「」『』【】〔〕《》〈〉╭╮╯╰┌┐└┘┃│║]+$/u,
-    ""
+    /[^a-z0-9\s]/g,
+    " "
+  );
+
+  // ------------------------------------------
+  // Remove repeated spaces
+  // ------------------------------------------
+
+  result = result.replace(
+    /\s+/g,
+    " "
   );
 
   result = result.trim();
+
+  // ------------------------------------------
+  // Discord cannot have empty names
+  // ------------------------------------------
 
   if (!result) {
     result = "channel";
   }
 
+  // Discord max channel name length
   return result.slice(0, 100);
 }
 
 // ======================================================
-// Calculate new name
+// GET CHANNELS ONLY
+// ======================================================
+
+function getChannels(guild) {
+
+  return [
+    ...guild.channels.cache.values()
+  ].filter(channel => {
+
+    return (
+      channel.type !== ChannelType.GuildCategory &&
+      typeof channel.setName === "function" &&
+      channel.name
+    );
+
+  });
+}
+
+// ======================================================
+// GET CATEGORIES ONLY
+// ======================================================
+
+function getCategories(guild) {
+
+  return [
+    ...guild.channels.cache.values()
+  ].filter(channel => {
+
+    return (
+      channel.type === ChannelType.GuildCategory &&
+      typeof channel.setName === "function" &&
+      channel.name
+    );
+
+  });
+}
+
+// ======================================================
+// CALCULATE NEW NAME
 // ======================================================
 
 function getNewName(channel, action) {
+
   switch (action.mode) {
 
     // ------------------------------------------
     // REPLACE
     // ------------------------------------------
+
     case "replace":
-      return String(action.name || "")
+
+      return String(
+        action.name || ""
+      )
         .trim()
         .slice(0, 100);
 
     // ------------------------------------------
     // PREFIX
     // ------------------------------------------
-    case "prefix": {
-      const prefix = String(action.prefix || "");
-      const separator = action.space_after_prefix ? " " : "";
 
-      return `${prefix}${separator}${channel.name}`
-        .slice(0, 100);
+    case "prefix": {
+
+      const prefix =
+        String(action.prefix || "");
+
+      const separator =
+        action.space_after_prefix
+          ? " "
+          : "";
+
+      return (
+        prefix +
+        separator +
+        channel.name
+      ).slice(0, 100);
     }
 
     // ------------------------------------------
     // SUFFIX
     // ------------------------------------------
+
     case "suffix":
-      return `${channel.name}${action.suffix || ""}`
-        .slice(0, 100);
+
+      return (
+        channel.name +
+        String(action.suffix || "")
+      ).slice(0, 100);
 
     // ------------------------------------------
     // SIMPLE
     // ------------------------------------------
+
     case "simple":
-      return makeSimpleName(channel.name);
+
+      return makeSimpleName(
+        channel.name
+      );
 
     default:
+
       return null;
   }
 }
 
 // ======================================================
-// Execute rename
+// EXECUTE CHANNEL RENAME
 // ======================================================
 
-async function executeChannelRename(message, action) {
+async function executeChannelRename(
+  message,
+  action
+) {
 
   // ==================================================
-  // Permission check - USER
+  // USER PERMISSION
   // ==================================================
 
   if (
@@ -121,19 +262,26 @@ async function executeChannelRename(message, action) {
       PermissionsBitField.Flags.ManageChannels
     )
   ) {
+
     return message.reply({
-      content: "❌ You need **Manage Channels** permission.",
+
+      content:
+        "❌ You need **Manage Channels** permission.",
+
       allowedMentions: {
         repliedUser: false
       }
+
     });
+
   }
 
   // ==================================================
-  // Permission check - BOT
+  // BOT PERMISSION
   // ==================================================
 
-  const botMember = message.guild.members.me;
+  const botMember =
+    message.guild.members.me;
 
   if (
     !botMember ||
@@ -141,93 +289,125 @@ async function executeChannelRename(message, action) {
       PermissionsBitField.Flags.ManageChannels
     )
   ) {
+
     return message.reply({
-      content: "❌ I need **Manage Channels** permission.",
+
+      content:
+        "❌ I need **Manage Channels** permission.",
+
       allowedMentions: {
         repliedUser: false
       }
+
     });
+
   }
 
   // ==================================================
-  // Validate action
+  // CHECK ACTION
   // ==================================================
 
   if (!action) {
+
     return message.reply({
-      content: "❌ No rename action was provided.",
+
+      content:
+        "❌ No rename action was provided.",
+
       allowedMentions: {
         repliedUser: false
       }
+
     });
+
   }
 
-  const target = action.target || "channel";
-  const mode = action.mode || "prefix";
+  console.log(
+    "========================================"
+  );
 
-  console.log("========================================");
-  console.log("🔄 CHANNEL RENAME REQUEST");
-  console.log("Target:", target);
-  console.log("Mode:", mode);
-  console.log("Action:", JSON.stringify(action, null, 2));
-  console.log("========================================");
+  console.log(
+    "🔄 RENAME REQUEST"
+  );
+
+  console.log(
+    JSON.stringify(
+      action,
+      null,
+      2
+    )
+  );
+
+  console.log(
+    "========================================"
+  );
 
   // ==================================================
-  // GET TARGETS
+  // TARGET
   // ==================================================
+
+  const target =
+    action.target || "channel";
 
   let changeable = [];
   let skipped = [];
 
-  // --------------------------------------------------
-  // CHANNELS ONLY
-  // --------------------------------------------------
+  // ==================================================
+  // CHANNEL
+  // ==================================================
 
-  if (target === "channel") {
+  if (
+    target === "channel"
+  ) {
 
-    changeable = getTargetChannels(
-      message.guild
-    );
-
-  }
-
-  // --------------------------------------------------
-  // CATEGORIES ONLY
-  // --------------------------------------------------
-
-  else if (target === "category") {
-
-    changeable = getTargetCategories(
-      message.guild
-    );
+    changeable =
+      getChannels(
+        message.guild
+      );
 
   }
 
-  // --------------------------------------------------
-  // INVALID TARGET
-  // --------------------------------------------------
+  // ==================================================
+  // CATEGORY
+  // ==================================================
+
+  else if (
+    target === "category"
+  ) {
+
+    changeable =
+      getCategories(
+        message.guild
+      );
+
+  }
 
   else {
 
     return message.reply({
+
       content:
-        "❌ Invalid target. Use `channel` or `category`.",
+        "❌ Target must be `channel` or `category`.",
+
       allowedMentions: {
         repliedUser: false
       }
+
     });
 
   }
 
   // ==================================================
-  // CURRENT SCOPE
+  // CURRENT
   // ==================================================
 
-  if (action.scope === "current") {
+  if (
+    action.scope === "current"
+  ) {
 
-    let current = null;
-
-    if (target === "channel") {
+    if (
+      target === "channel"
+    ) {
 
       if (
         message.channel.type ===
@@ -236,7 +416,7 @@ async function executeChannelRename(message, action) {
 
         return message.reply({
           content:
-            "❌ The current object is a category, not a channel.",
+            "❌ This is a category, not a channel.",
           allowedMentions: {
             repliedUser: false
           }
@@ -244,42 +424,57 @@ async function executeChannelRename(message, action) {
 
       }
 
-      current = message.channel;
+      changeable = [
+        message.channel
+      ];
 
-    } else if (target === "category") {
+    }
+
+    else {
+
+      let category = null;
 
       if (
         message.channel.type ===
         ChannelType.GuildCategory
       ) {
 
-        current = message.channel;
-
-      } else if (message.channel.parent) {
-
-        current = message.channel.parent;
+        category =
+          message.channel;
 
       }
 
+      else if (
+        message.channel.parent
+      ) {
+
+        category =
+          message.channel.parent;
+
+      }
+
+      if (!category) {
+
+        return message.reply({
+          content:
+            "❌ No category found.",
+          allowedMentions: {
+            repliedUser: false
+          }
+        });
+
+      }
+
+      changeable = [
+        category
+      ];
+
     }
 
-    if (!current) {
-
-      return message.reply({
-        content:
-          "❌ I couldn't find the requested current object.",
-        allowedMentions: {
-          repliedUser: false
-        }
-      });
-
-    }
-
-    changeable = [current];
   }
 
   // ==================================================
-  // NAMED SCOPE
+  // SPECIFIC NAME
   // ==================================================
 
   if (
@@ -287,83 +482,101 @@ async function executeChannelRename(message, action) {
     action.oldName
   ) {
 
-    const wanted = action.oldName
-      .toLowerCase()
-      .trim();
+    const wanted =
+      action.oldName
+        .toLowerCase()
+        .trim();
 
-    const found = changeable.find(
-      channel =>
-        channel.name.toLowerCase() === wanted
-    );
+    const found =
+      changeable.find(
+        channel =>
+          channel.name
+            .toLowerCase()
+            === wanted
+      );
 
     if (!found) {
 
       return message.reply({
+
         content:
-          `❌ I couldn't find ${target} **${action.oldName}**.`,
+          `❌ ${target} **${action.oldName}** was not found.`,
+
         allowedMentions: {
           repliedUser: false
         }
+
       });
 
     }
 
-    changeable = [found];
+    changeable = [
+      found
+    ];
+
   }
 
   // ==================================================
   // SPECIFIC MODE
   // ==================================================
 
-  if (mode === "specific") {
+  if (
+    action.mode === "specific"
+  ) {
 
-    if (!action.name) {
+    action.mode =
+      "replace";
 
-      return message.reply({
-        content:
-          "❌ No new name was provided.",
-        allowedMentions: {
-          repliedUser: false
-        }
-      });
-
-    }
-
-    mode = "replace";
   }
 
   // ==================================================
-  // REMOVE UNMANAGEABLE CHANNELS
+  // CHECK MANAGEABLE
   // ==================================================
 
   const manageable = [];
 
-  for (const channel of changeable) {
+  for (
+    const channel of changeable
+  ) {
 
-    if (!channel.manageable) {
+    if (
+      !channel.manageable
+    ) {
 
-      skipped.push(channel);
+      skipped.push(
+        channel
+      );
+
       continue;
 
     }
 
-    manageable.push(channel);
+    manageable.push(
+      channel
+    );
+
   }
 
-  changeable = manageable;
+  changeable =
+    manageable;
 
   // ==================================================
-  // NOTHING TO CHANGE
+  // NOTHING
   // ==================================================
 
-  if (changeable.length === 0) {
+  if (
+    changeable.length === 0
+  ) {
 
     return message.reply({
+
       content:
-        "ℹ️ I couldn't find any manageable channels/categories that need changing.",
+        "ℹ️ There are no manageable objects to change.",
+
       allowedMentions: {
         repliedUser: false
       }
+
     });
 
   }
@@ -375,40 +588,24 @@ async function executeChannelRename(message, action) {
   let preview = "";
 
   for (
-    const channel of changeable.slice(0, 25)
+    const channel of
+    changeable.slice(0, 25)
   ) {
 
-    let newName;
-
-    if (mode === "replace") {
-
-      newName = String(
-        action.name || ""
-      )
-        .trim()
-        .slice(0, 100);
-
-    } else {
-
-      newName = getNewName(
+    const newName =
+      getNewName(
         channel,
-        {
-          ...action,
-          mode
-        }
+        action
       );
-
-    }
-
-    if (!newName) {
-      newName = channel.name;
-    }
 
     preview +=
       `\`${channel.name}\` → \`${newName}\`\n`;
+
   }
 
-  if (changeable.length > 25) {
+  if (
+    changeable.length > 25
+  ) {
 
     preview +=
       `\n…and ${
@@ -418,43 +615,81 @@ async function executeChannelRename(message, action) {
   }
 
   // ==================================================
-  // PREVIEW DESCRIPTION
+  // MODE DESCRIPTION
   // ==================================================
 
-  let modeText = mode;
+  let modeDescription =
+    action.mode;
 
-  if (mode === "replace") {
-    modeText =
-      `Replace with: **${action.name}**`;
+  if (
+    action.mode === "replace"
+  ) {
+
+    modeDescription =
+      `Replace with **${action.name}**`;
+
   }
 
-  if (mode === "prefix") {
-    modeText =
-      `Prefix: **${action.prefix || ""}**`;
+  else if (
+    action.mode === "prefix"
+  ) {
+
+    modeDescription =
+      `Add prefix **${action.prefix}**`;
+
   }
 
-  if (mode === "suffix") {
-    modeText =
-      `Suffix: **${action.suffix || ""}**`;
+  else if (
+    action.mode === "suffix"
+  ) {
+
+    modeDescription =
+      `Add suffix **${action.suffix}**`;
+
   }
 
-  if (mode === "simple") {
-    modeText =
-      "Remove decorative styling";
+  else if (
+    action.mode === "simple"
+  ) {
+
+    modeDescription =
+      "Remove everything except normal words and numbers";
+
   }
 
-  const embed = new EmbedBuilder()
-    .setTitle("🔄 Here's what I understood")
-    .setDescription(
-      `**Action:** Rename ${target}s\n` +
-      `**${target}s:** ${changeable.length}\n` +
-      `**Mode:** ${modeText}\n\n` +
-      preview
-    )
-    .setFooter({
-      text:
-        "Nothing will change until you press Agree."
-    });
+  // ==================================================
+  // EMBED
+  // ==================================================
+
+  const embed =
+    new EmbedBuilder()
+
+      .setTitle(
+        "🔄 Here's what I understood"
+      )
+
+      .setDescription(
+
+        `**Action:** Rename ${target}s\n` +
+
+        `**${target}s:** ${
+          changeable.length
+        }\n` +
+
+        `**Mode:** ${
+          modeDescription
+        }\n\n` +
+
+        preview
+
+      )
+
+      .setFooter({
+
+        text:
+          "Nothing will change until you press Agree."
+
+      });
 
   // ==================================================
   // BUTTONS
@@ -465,33 +700,57 @@ async function executeChannelRename(message, action) {
       .addComponents(
 
         new ButtonBuilder()
+
           .setCustomId(
             `channel_rename_agree_${message.author.id}`
           )
-          .setLabel("Agree")
-          .setEmoji("✅")
+
+          .setLabel(
+            "Agree"
+          )
+
+          .setEmoji(
+            "✅"
+          )
+
           .setStyle(
             ButtonStyle.Success
           ),
 
         new ButtonBuilder()
+
           .setCustomId(
             `channel_rename_cancel_${message.author.id}`
           )
-          .setLabel("Cancel")
-          .setEmoji("❌")
+
+          .setLabel(
+            "Cancel"
+          )
+
+          .setEmoji(
+            "❌"
+          )
+
           .setStyle(
             ButtonStyle.Danger
           )
 
       );
 
+  // ==================================================
+  // SEND PREVIEW
+  // ==================================================
+
   const reply =
     await message.reply({
 
-      embeds: [embed],
+      embeds: [
+        embed
+      ],
 
-      components: [buttons],
+      components: [
+        buttons
+      ],
 
       allowedMentions: {
         repliedUser: false
@@ -500,20 +759,27 @@ async function executeChannelRename(message, action) {
     });
 
   // ==================================================
-  // CONFIRMATION COLLECTOR
+  // BUTTON COLLECTOR
   // ==================================================
 
   const collector =
     reply.createMessageComponentCollector({
-      time: 60_000
+
+      time:
+        60_000
+
     });
+
+  // ==================================================
+  // BUTTON CLICK
+  // ==================================================
 
   collector.on(
     "collect",
     async interaction => {
 
       // ----------------------------------------------
-      // ONLY ORIGINAL USER
+      // WRONG USER
       // ----------------------------------------------
 
       if (
@@ -521,17 +787,16 @@ async function executeChannelRename(message, action) {
         message.author.id
       ) {
 
-        try {
+        return interaction.reply({
 
-          await interaction.reply({
-            content:
-              "❌ Only the person who requested this can confirm it.",
-            ephemeral: true
-          });
+          content:
+            "❌ Only the person who requested this can confirm it.",
 
-        } catch {}
+          ephemeral:
+            true
 
-        return;
+        });
+
       }
 
       // ==================================================
@@ -545,7 +810,9 @@ async function executeChannelRename(message, action) {
 
         await interaction.deferUpdate();
 
-        collector.stop("cancelled");
+        collector.stop(
+          "cancelled"
+        );
 
         await reply.edit({
 
@@ -559,6 +826,7 @@ async function executeChannelRename(message, action) {
         });
 
         return;
+
       }
 
       // ==================================================
@@ -575,7 +843,7 @@ async function executeChannelRename(message, action) {
         await reply.edit({
 
           content:
-            "⏳ I'm changing the names now...",
+            "⏳ Changing names...",
 
           embeds: [],
 
@@ -586,64 +854,107 @@ async function executeChannelRename(message, action) {
         let changed = 0;
         let failed = 0;
 
-        // ----------------------------------------------
+        // ==================================================
         // ACTUAL RENAME
-        // ----------------------------------------------
+        // ==================================================
 
         for (
-          const channel of changeable
+          const channel of
+          changeable
         ) {
 
           try {
 
-            let newName;
+            const oldName =
+              channel.name;
+
+            const newName =
+              getNewName(
+                channel,
+                action
+              );
 
             // ------------------------------------------
-            // REPLACE
+            // Invalid
             // ------------------------------------------
 
             if (
-              mode === "replace"
+              !newName
             ) {
 
-              newName =
-                String(
-                  action.name || ""
-                )
-                  .trim()
-                  .slice(0, 100);
-
-            }
-
-            // ------------------------------------------
-            // PREFIX / SUFFIX / SIMPLE
-            // ------------------------------------------
-
-            else {
-
-              newName =
-                getNewName(
-                  channel,
-                  {
-                    ...action,
-                    mode
-                  }
-                );
-
-            }
-
-            if (
-              !newName ||
-              newName === channel.name
-            ) {
-
-              skipped.push(channel);
+              failed++;
               continue;
 
             }
 
-            const oldName =
-              channel.name;
+            // ------------------------------------------
+            // Already same
+            // ------------------------------------------
+
+            if (
+              oldName ===
+              newName
+            ) {
+
+              skipped.push(
+                channel
+              );
+
+              continue;
+
+            }
+
+            // ------------------------------------------
+            // SAVE OLD NAME
+            //
+            // This is useful for future UNDO support.
+            // ------------------------------------------
+
+            if (
+              !global.channelRenameHistory
+            ) {
+
+              global.channelRenameHistory =
+                new Map();
+
+            }
+
+            if (
+              !global.channelRenameHistory.has(
+                message.guild.id
+              )
+            ) {
+
+              global.channelRenameHistory.set(
+                message.guild.id,
+                []
+              );
+
+            }
+
+            global.channelRenameHistory
+              .get(
+                message.guild.id
+              )
+              .push({
+
+                channelId:
+                  channel.id,
+
+                oldName:
+                  oldName,
+
+                newName:
+                  newName,
+
+                timestamp:
+                  Date.now()
+
+              });
+
+            // ------------------------------------------
+            // RENAME
+            // ------------------------------------------
 
             await channel.setName(
               newName,
@@ -653,10 +964,13 @@ async function executeChannelRename(message, action) {
             changed++;
 
             console.log(
-              `✅ Renamed: ${oldName} → ${newName}`
+              `✅ ${oldName} → ${newName}`
             );
 
-            // Small delay
+            // ------------------------------------------
+            // Delay
+            // ------------------------------------------
+
             await new Promise(
               resolve =>
                 setTimeout(
@@ -665,7 +979,9 @@ async function executeChannelRename(message, action) {
                 )
             );
 
-          } catch (error) {
+          }
+
+          catch (error) {
 
             failed++;
 
@@ -678,7 +994,9 @@ async function executeChannelRename(message, action) {
 
         }
 
-        collector.stop("completed");
+        collector.stop(
+          "completed"
+        );
 
         // ==================================================
         // RESULT
@@ -686,51 +1004,82 @@ async function executeChannelRename(message, action) {
 
         const result =
           new EmbedBuilder()
+
             .setTitle(
               "✅ Rename Complete"
             )
+
             .setDescription(
-              `Successfully processed the rename request.`
+              "The rename operation has finished."
             )
+
             .addFields(
 
               {
-                name: "Target",
-                value: target,
-                inline: true
+                name:
+                  "Target",
+
+                value:
+                  target,
+
+                inline:
+                  true
               },
 
               {
-                name: "Mode",
-                value: mode,
-                inline: true
+                name:
+                  "Mode",
+
+                value:
+                  action.mode,
+
+                inline:
+                  true
               },
 
               {
-                name: "Changed",
-                value: String(changed),
-                inline: true
+                name:
+                  "Changed",
+
+                value:
+                  String(changed),
+
+                inline:
+                  true
               },
 
               {
-                name: "Failed",
-                value: String(failed),
-                inline: true
+                name:
+                  "Failed",
+
+                value:
+                  String(failed),
+
+                inline:
+                  true
               },
 
               {
-                name: "Skipped",
-                value: String(skipped.length),
-                inline: true
+                name:
+                  "Skipped",
+
+                value:
+                  String(skipped.length),
+
+                inline:
+                  true
               }
 
             );
 
         await reply.edit({
 
-          content: "",
+          content:
+            "",
 
-          embeds: [result],
+          embeds: [
+            result
+          ],
 
           components: []
 
@@ -749,8 +1098,13 @@ async function executeChannelRename(message, action) {
     "end",
     async (_, reason) => {
 
-      if (reason !== "time") {
+      if (
+        reason !==
+        "time"
+      ) {
+
         return;
+
       }
 
       try {
@@ -766,7 +1120,9 @@ async function executeChannelRename(message, action) {
 
         });
 
-      } catch {}
+      }
+
+      catch {}
 
     }
   );

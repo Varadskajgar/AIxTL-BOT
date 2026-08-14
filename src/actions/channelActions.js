@@ -18,21 +18,24 @@ async function executeChannelRename(message, action) {
       PermissionsBitField.Flags.ManageChannels
     )
   ) {
-    return message.reply(
-      "❌ You need **Manage Channels** permission."
-    );
+    return message.reply({
+      content: "❌ You need **Manage Channels** permission.",
+      allowedMentions: { repliedUser: false }
+    });
   }
 
   const botMember = message.guild.members.me;
 
   if (
+    !botMember ||
     !botMember.permissions.has(
       PermissionsBitField.Flags.ManageChannels
     )
   ) {
-    return message.reply(
-      "❌ I need **Manage Channels** permission."
-    );
+    return message.reply({
+      content: "❌ I need **Manage Channels** permission.",
+      allowedMentions: { repliedUser: false }
+    });
   }
 
   // -----------------------------
@@ -48,7 +51,7 @@ async function executeChannelRename(message, action) {
 
   for (const channel of channels) {
 
-    // Categories are excluded
+    // Exclude categories if requested
     if (
       action.exclude_categories &&
       channel.type === ChannelType.GuildCategory
@@ -72,6 +75,7 @@ async function executeChannelRename(message, action) {
       continue;
     }
 
+    // Bot cannot manage this channel
     if (!channel.manageable) {
       skipped.push(channel);
       continue;
@@ -81,9 +85,11 @@ async function executeChannelRename(message, action) {
   }
 
   if (changeable.length === 0) {
-    return message.reply(
-      "ℹ️ I couldn't find any channels that need changing."
-    );
+    return message.reply({
+      content:
+        "ℹ️ I couldn't find any channels that need changing.",
+      allowedMentions: { repliedUser: false }
+    });
   }
 
   // -----------------------------
@@ -126,12 +132,16 @@ async function executeChannelRename(message, action) {
       text: "Nothing will change until you press Agree."
     });
 
+  // -----------------------------
+  // Buttons
+  // -----------------------------
+
   const buttons = new ActionRowBuilder()
     .addComponents(
 
       new ButtonBuilder()
         .setCustomId(
-          `agree_${message.author.id}`
+          `channel_rename_agree_${message.author.id}`
         )
         .setLabel("Agree")
         .setEmoji("✅")
@@ -139,7 +149,7 @@ async function executeChannelRename(message, action) {
 
       new ButtonBuilder()
         .setCustomId(
-          `cancel_${message.author.id}`
+          `channel_rename_cancel_${message.author.id}`
         )
         .setLabel("Cancel")
         .setEmoji("❌")
@@ -148,11 +158,14 @@ async function executeChannelRename(message, action) {
 
   const reply = await message.reply({
     embeds: [embed],
-    components: [buttons]
+    components: [buttons],
+    allowedMentions: {
+      repliedUser: false
+    }
   });
 
   // -----------------------------
-  // Confirmation
+  // Confirmation collector
   // -----------------------------
 
   const collector =
@@ -162,110 +175,209 @@ async function executeChannelRename(message, action) {
 
   collector.on("collect", async (interaction) => {
 
+    console.log(
+      `🔘 Button clicked: ${interaction.customId} by ${interaction.user.tag}`
+    );
+
+    // -----------------------------
+    // Only original user
+    // -----------------------------
+
     if (
       interaction.user.id !== message.author.id
     ) {
-      return interaction.reply({
-        content:
-          "❌ Only the person who requested this can confirm it.",
-        ephemeral: true
-      });
+      try {
+        await interaction.reply({
+          content:
+            "❌ Only the person who requested this can confirm it.",
+          ephemeral: true
+        });
+      } catch (error) {
+        console.error(
+          "❌ Failed to reply to unauthorized interaction:",
+          error
+        );
+      }
+
+      return;
     }
 
+    // -----------------------------
     // CANCEL
+    // -----------------------------
+
     if (
       interaction.customId ===
-      `cancel_${message.author.id}`
+      `channel_rename_cancel_${message.author.id}`
     ) {
 
-      collector.stop("cancelled");
+      try {
 
-      return interaction.update({
-        content:
-          "❌ Cancelled. Nothing was changed.",
-        embeds: [],
-        components: []
-      });
+        // Acknowledge immediately
+        await interaction.deferUpdate();
+
+        collector.stop("cancelled");
+
+        await reply.edit({
+          content:
+            "❌ Cancelled. Nothing was changed.",
+          embeds: [],
+          components: []
+        });
+
+        console.log("❌ Channel rename cancelled.");
+
+      } catch (error) {
+
+        console.error(
+          "❌ Cancel button error:",
+          error
+        );
+      }
+
+      return;
     }
 
+    // -----------------------------
     // AGREE
+    // -----------------------------
+
     if (
       interaction.customId ===
-      `agree_${message.author.id}`
+      `channel_rename_agree_${message.author.id}`
     ) {
 
-      await interaction.update({
-        content:
-          "⏳ I'm changing the channels now...",
-        embeds: [],
-        components: []
-      });
+      try {
 
-      let changed = 0;
-      let failed = 0;
+        // IMPORTANT:
+        // Acknowledge Discord immediately
+        await interaction.deferUpdate();
 
-      const prefix = action.prefix || "";
+        // Disable buttons immediately
+        await reply.edit({
+          content:
+            "⏳ I'm changing the channels now...",
+          embeds: [],
+          components: []
+        });
 
-      const separator =
-        action.space_after_prefix
-          ? " "
-          : "";
+        let changed = 0;
+        let failed = 0;
 
-      for (const channel of changeable) {
+        const prefix = action.prefix || "";
+
+        const separator =
+          action.space_after_prefix
+            ? " "
+            : "";
+
+        // -----------------------------
+        // Rename channels
+        // -----------------------------
+
+        for (const channel of changeable) {
+
+          try {
+
+            const newName =
+              `${prefix}${separator}${channel.name}`;
+
+            await channel.setName(newName);
+
+            changed++;
+
+            console.log(
+              `✅ Renamed: ${channel.name} → ${newName}`
+            );
+
+          } catch (error) {
+
+            failed++;
+
+            console.error(
+              `❌ Failed to rename ${channel.name}:`,
+              error.message
+            );
+          }
+        }
+
+        collector.stop("completed");
+
+        // -----------------------------
+        // Result
+        // -----------------------------
+
+        const result = new EmbedBuilder()
+          .setTitle("✅ Channel Rename Complete")
+          .setDescription(
+            "The channel rename operation has finished."
+          )
+          .addFields(
+            {
+              name: "Changed",
+              value: `${changed}`,
+              inline: true
+            },
+            {
+              name: "Failed",
+              value: `${failed}`,
+              inline: true
+            },
+            {
+              name: "Skipped",
+              value: `${skipped.length}`,
+              inline: true
+            }
+          );
+
+        await reply.edit({
+          content: "",
+          embeds: [result],
+          components: []
+        });
+
+        console.log(
+          `✅ Rename completed. Changed: ${changed}, Failed: ${failed}`
+        );
+
+      } catch (error) {
+
+        console.error(
+          "❌ Agree button error:",
+          error
+        );
 
         try {
 
-          const newName =
-            `${prefix}${separator}${channel.name}`;
+          await reply.edit({
+            content:
+              "❌ Something went wrong while renaming the channels.",
+            embeds: [],
+            components: []
+          });
 
-          await channel.setName(newName);
-
-          changed++;
-
-        } catch (error) {
-
-          failed++;
+        } catch (editError) {
 
           console.error(
-            `Failed to rename ${channel.name}:`,
-            error.message
+            "❌ Could not update confirmation message:",
+            editError
           );
         }
       }
 
-      collector.stop("completed");
-
-      const result = new EmbedBuilder()
-        .setTitle("✅ Done")
-        .setDescription(
-          `I finished the channel rename.`
-        )
-        .addFields(
-          {
-            name: "Changed",
-            value: `${changed}`,
-            inline: true
-          },
-          {
-            name: "Failed",
-            value: `${failed}`,
-            inline: true
-          }
-        );
-
-      return interaction.editReply({
-        content: "",
-        embeds: [result],
-        components: []
-      });
+      return;
     }
   });
 
   // -----------------------------
-  // Confirmation timeout
+  // Collector error
   // -----------------------------
 
   collector.on("end", async (_, reason) => {
+
+    console.log(
+      `🔚 Button collector ended: ${reason}`
+    );
 
     if (reason === "time") {
 
@@ -278,7 +390,13 @@ async function executeChannelRename(message, action) {
           components: []
         });
 
-      } catch {}
+      } catch (error) {
+
+        console.error(
+          "❌ Could not update expired confirmation:",
+          error.message
+        );
+      }
     }
   });
 }

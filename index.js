@@ -1,5 +1,3 @@
-require("dotenv").config();
-
 const express = require("express");
 
 const {
@@ -14,7 +12,21 @@ const {
 } = require("./src/actions/channelActions");
 
 // ==========================================
-// WEB SERVER FOR RENDER
+// CHECK ENVIRONMENT VARIABLES
+// ==========================================
+
+if (!process.env.DISCORD_TOKEN) {
+  console.error("❌ DISCORD_TOKEN is missing.");
+  process.exit(1);
+}
+
+if (!process.env.OPENAI_API_KEY) {
+  console.error("❌ OPENAI_API_KEY is missing.");
+  process.exit(1);
+}
+
+// ==========================================
+// WEB SERVER FOR RENDER FREE WEB SERVICE
 // ==========================================
 
 const app = express();
@@ -28,7 +40,7 @@ app.get("/", (req, res) => {
 app.get("/health", (req, res) => {
   res.status(200).json({
     status: "online",
-    bot: client.user ? client.user.tag : "starting"
+    discord: client.isReady() ? "connected" : "connecting"
   });
 });
 
@@ -49,7 +61,7 @@ const client = new Client({
 });
 
 // ==========================================
-// BOT READY
+// DISCORD READY
 // ==========================================
 
 client.once("ready", () => {
@@ -67,14 +79,13 @@ client.once("ready", () => {
 
 client.on("messageCreate", async (message) => {
   try {
-
-    // Ignore bots
+    // Ignore other bots
     if (message.author.bot) return;
 
     // Ignore DMs
     if (!message.guild) return;
 
-    // Only respond when bot is mentioned
+    // Only respond when the bot is mentioned
     if (!message.mentions.users.has(client.user.id)) {
       return;
     }
@@ -89,7 +100,7 @@ client.on("messageCreate", async (message) => {
       .replace(mentionRegex, "")
       .trim();
 
-    // Empty message
+    // Empty request
     if (!userMessage) {
       return message.reply({
         content:
@@ -102,18 +113,18 @@ client.on("messageCreate", async (message) => {
 
     console.log("---------------------------------");
     console.log(`👤 User: ${message.author.tag}`);
-    console.log(`💬 Message: ${userMessage}`);
+    console.log(`💬 ${userMessage}`);
 
-    // Discord typing indicator
+    // Show typing
     await message.channel.sendTyping();
 
     // ======================================
-    // AI UNDERSTANDS USER
+    // AI INTERPRETER
     // ======================================
 
     const action = await interpret(userMessage);
 
-    console.log("🧠 AI Action:");
+    console.log("🧠 AI interpreted:");
     console.log(action);
 
     // ======================================
@@ -121,10 +132,8 @@ client.on("messageCreate", async (message) => {
     // ======================================
 
     if (action.action === "chat") {
-
       return message.reply({
-        content:
-          action.reply || "I'm here.",
+        content: action.reply || "I'm here.",
         allowedMentions: {
           repliedUser: false
         }
@@ -132,11 +141,10 @@ client.on("messageCreate", async (message) => {
     }
 
     // ======================================
-    // AI NEEDS CLARIFICATION
+    // NEED CLARIFICATION
     // ======================================
 
     if (action.action === "clarify") {
-
       return message.reply({
         content:
           `❓ ${action.question || "Can you explain what you mean?"}`,
@@ -151,7 +159,6 @@ client.on("messageCreate", async (message) => {
     // ======================================
 
     if (action.action === "rename_channels") {
-
       return executeChannelRename(
         message,
         action
@@ -159,13 +166,12 @@ client.on("messageCreate", async (message) => {
     }
 
     // ======================================
-    // ACTION NOT AVAILABLE YET
+    // ACTION NOT IMPLEMENTED
     // ======================================
 
     return message.reply({
       content:
-        `🧠 I understood your request as **${action.action}**, ` +
-        `but I haven't learned how to perform that action yet.`,
+        `🧠 I understood what you want, but I don't have the **${action.action}** ability yet.`,
       allowedMentions: {
         repliedUser: false
       }
@@ -179,7 +185,6 @@ client.on("messageCreate", async (message) => {
     console.error("=================================");
 
     try {
-
       await message.reply({
         content:
           "❌ Something went wrong while processing your request.",
@@ -187,9 +192,7 @@ client.on("messageCreate", async (message) => {
           repliedUser: false
         }
       });
-
     } catch (replyError) {
-
       console.error(
         "❌ Could not send error message:",
         replyError
@@ -227,33 +230,9 @@ process.on("uncaughtException", (error) => {
 });
 
 // ==========================================
-// ENVIRONMENT CHECK
-// ==========================================
-
-if (!process.env.DISCORD_TOKEN) {
-
-  console.error(
-    "❌ DISCORD_TOKEN is missing!"
-  );
-
-  process.exit(1);
-}
-
-if (!process.env.OPENAI_API_KEY) {
-
-  console.error(
-    "❌ OPENAI_API_KEY is missing!"
-  );
-
-  process.exit(1);
-}
-
-// ==========================================
-// START DISCORD BOT
+// LOGIN
 // ==========================================
 
 console.log("🔄 Starting Discord bot...");
 
-client.login(
-  process.env.DISCORD_TOKEN
-);
+client.login(process.env.DISCORD_TOKEN);

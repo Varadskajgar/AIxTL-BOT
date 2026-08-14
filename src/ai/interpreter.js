@@ -1,159 +1,63 @@
-const { GoogleGenerativeAI } = require("@google/generative-ai");
+const { GoogleGenAI } = require("@google/genai");
 
-if (!process.env.GEMINI_API_KEY) {
+const apiKey = process.env.GEMINI_API_KEY;
+
+if (!apiKey) {
     throw new Error("GEMINI_API_KEY is missing.");
 }
 
-const genAI = new GoogleGenerativeAI(
-    process.env.GEMINI_API_KEY
-);
-
-const model = genAI.getGenerativeModel({
-    model: "gemini-1.5-flash"
+const ai = new GoogleGenAI({
+    apiKey: apiKey
 });
 
-async function interpret(userMessage) {
-
+async function interpret(message) {
     const prompt = `
-You are an intelligent Discord server assistant.
+You are an AI assistant inside a Discord server.
 
-Your job is to understand normal human language and convert it into a JSON action.
+Your job is to understand natural-language Discord management requests.
 
-IMPORTANT RULES:
+User request:
+"${message}"
 
-1. Understand natural language.
-2. Do not require the user to use a specific command format.
-3. "channel" means Discord channels.
-4. "category" means Discord categories.
-5. NEVER change categories when the user says channels.
-6. If the user says "all channels", target all text/voice/forum/stage channels that can be renamed.
-7. Preserve the user's requested prefix exactly.
-8. If the user asks for a font/style, understand what they mean.
-9. Do not execute anything. Only return the instruction as JSON.
-10. Return ONLY valid JSON. No markdown. No explanation.
+Return a clear JSON object describing what the user wants.
 
-SUPPORTED ACTIONS:
-
-rename_channels
-create_channel
-delete_channel
-help
-chat
-clarify
-
-EXAMPLE 1:
+For example:
 
 User:
-change all channels in simple font and use this first 〢
+"change all channel in simple font and use this first 〢"
 
-JSON:
+Return:
 {
   "action": "rename_channels",
   "target": "channels",
   "scope": "all",
-  "style": "simple",
-  "prefix": "〢"
+  "prefix": "〢",
+  "style": "simple"
 }
 
-EXAMPLE 2:
-
-User:
-rename every channel with 〢 before the name
-
-JSON:
-{
-  "action": "rename_channels",
-  "target": "channels",
-  "scope": "all",
-  "style": "simple",
-  "prefix": "〢"
-}
-
-EXAMPLE 3:
-
-User:
-change all channel names to simple style and put 〢 at the beginning
-
-JSON:
-{
-  "action": "rename_channels",
-  "target": "channels",
-  "scope": "all",
-  "style": "simple",
-  "prefix": "〢"
-}
-
-EXAMPLE 4:
-
-User:
-create a channel called announcements
-
-JSON:
-{
-  "action": "create_channel",
-  "name": "announcements"
-}
-
-EXAMPLE 5:
-
-User:
-help
-
-JSON:
-{
-  "action": "help"
-}
-
-EXAMPLE 6:
-
-User:
-hello
-
-JSON:
-{
-  "action": "chat",
-  "reply": "Hello! What would you like me to do?"
-}
-
-If you are unsure what the user wants:
-
-{
-  "action": "clarify",
-  "question": "Please tell me what you want me to change."
-}
-
-USER MESSAGE:
-
-${userMessage}
+Important:
+- "channel" means channels, NOT categories.
+- "category" means categories.
+- If the user says "all channels", never include categories.
+- Understand normal conversational language.
+- Do not perform the action yourself.
+- Return ONLY valid JSON.
 `;
 
-    const result = await model.generateContent(prompt);
+    const response = await ai.models.generateContent({
+        model: "gemini-3.6-flash",
+        contents: prompt
+    });
 
-    const response = result.response;
-    const text = response.text().trim();
-
-    console.log("🤖 Gemini response:", text);
+    const text = response.text.trim();
 
     try {
-
-        const cleaned = text
-            .replace(/^```json/i, "")
-            .replace(/^```/i, "")
-            .replace(/```$/i, "")
-            .trim();
-
-        return JSON.parse(cleaned);
-
-    } catch (error) {
-
-        console.error("❌ Gemini returned invalid JSON:");
-        console.error(text);
-
-        return {
-            action: "clarify",
-            question: "I understood part of your request, but I couldn't determine the exact action."
-        };
+        return JSON.parse(text);
+    } catch {
+        throw new Error("Gemini returned invalid JSON: " + text);
     }
 }
 
-module.exports = interpret;
+module.exports = {
+    interpret
+};

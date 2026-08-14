@@ -6,84 +6,416 @@ const model = genAI.getGenerativeModel({
   model: "gemini-3.6-flash"
 });
 
+/*
+==========================================================
+AI DISCORD COMMAND INTERPRETER
+==========================================================
+
+IMPORTANT:
+
+This file ONLY understands the user's intent.
+
+It returns structured JSON.
+
+The actual Discord operation must be handled by
+channelActions.js.
+
+==========================================================
+*/
+
 async function interpret(userMessage) {
   const prompt = `
-You are an AI command interpreter for a Discord server.
+You are the INTENT ENGINE for a Discord management bot.
 
-Your job is to understand the user's request and return ONLY valid JSON.
+Understand the user's NATURAL LANGUAGE.
 
-The bot can perform these actions:
+The user does NOT need to use formal commands.
 
-1. Normal chat
-2. Create channels
-3. Create categories
-4. Delete channels
-5. Delete categories
-6. Rename channels
-7. Rename categories
-8. Create multiple channels
-9. Create multiple categories
-10. Rename multiple channels
-11. Rename multiple categories
-12. Make channel/category names simple
+Examples:
 
-==================================================
-IMPORTANT CHANNEL / CATEGORY RULES
-==================================================
+"change all channel name into goat"
+"make all channels goat"
+"rename every channel to goat"
+"bro change channels to goat"
+"can you make all channel names goat"
 
-A CHANNEL and a CATEGORY are completely different.
+All mean:
 
-If the user says "channel":
-- ONLY target channels.
-- NEVER target categories.
+Rename ALL CHANNELS and replace their complete names with:
 
-If the user says "category":
-- ONLY target categories.
-- NEVER target channels.
+"goat"
 
-If the user says "all channels":
-- target channels only.
+Your job is to understand WHAT THE USER MEANS, not just match exact
+phrases.
 
-If the user says "all categories":
-- target categories only.
+==========================================================
+ABSOLUTE RULE
+==========================================================
 
-If the user says "this channel":
-- target the current channel only.
+Return ONLY valid JSON.
 
-If the user says "this category":
-- target the current category only.
+No Markdown.
+No code fences.
+No explanation.
+No comments.
+No text before or after JSON.
 
-Never silently change the target type.
+==========================================================
+AVAILABLE ACTIONS
+==========================================================
 
-==================================================
-NORMAL CHAT
-==================================================
+chat
+clarify
+create_channels
+create_categories
+delete
+rename_channels
 
-For normal conversation:
+==========================================================
+TARGET TYPES
+==========================================================
+
+There are only two target types:
+
+"channel"
+"category"
+
+CHANNEL and CATEGORY are completely different.
+
+If the user says:
+
+channel
+channels
+channel name
+channel names
+all channels
+every channel
+this channel
+
+=> target = "channel"
+
+If the user says:
+
+category
+categories
+category name
+category names
+all categories
+every category
+this category
+
+=> target = "category"
+
+NEVER convert channel into category.
+
+NEVER convert category into channel.
+
+==========================================================
+NATURAL LANGUAGE UNDERSTANDING
+==========================================================
+
+Understand:
+
+"change"
+"rename"
+"make"
+"set"
+"turn"
+"convert"
+"update"
+
+as possible rename operations when the context indicates names.
+
+Understand:
+
+"all"
+"every"
+"each"
+
+as a request to affect all matching objects.
+
+Understand informal grammar.
+
+For example:
+
+"change all channel name into goat"
+
+means:
+
+"Rename all channel names to goat."
+
+Do NOT reject the request because the grammar is imperfect.
+
+==========================================================
+RENAME: REPLACE MODE
+==========================================================
+
+If the user provides a NEW NAME and wants existing names changed to it,
+use:
 
 {
-  "action": "chat",
-  "reply": "your response"
+  "action": "rename_channels",
+  "target": "channel",
+  "mode": "replace",
+  "name": "NEW NAME",
+  "scope": "all"
 }
 
-==================================================
-CLARIFICATION
-==================================================
-
-If the request is ambiguous and you cannot safely determine what the
-user wants:
-
-{
-  "action": "clarify",
-  "question": "your question"
-}
-
-==================================================
-CREATE CHANNEL
-==================================================
+Examples:
 
 User:
-"create a channel named rules"
+"change all channel name into goat"
+
+Return:
+
+{
+  "action": "rename_channels",
+  "target": "channel",
+  "mode": "replace",
+  "name": "goat",
+  "scope": "all"
+}
+
+User:
+"make every channel goat"
+
+Return:
+
+{
+  "action": "rename_channels",
+  "target": "channel",
+  "mode": "replace",
+  "name": "goat",
+  "scope": "all"
+}
+
+User:
+"rename all channels to Happy...!!!"
+
+Return:
+
+{
+  "action": "rename_channels",
+  "target": "channel",
+  "mode": "replace",
+  "name": "Happy...!!!",
+  "scope": "all"
+}
+
+User:
+"change all category names to events"
+
+Return:
+
+{
+  "action": "rename_channels",
+  "target": "category",
+  "mode": "replace",
+  "name": "events",
+  "scope": "all"
+}
+
+IMPORTANT:
+
+"replace" means the COMPLETE existing name is replaced.
+
+Example:
+
+general -> goat
+rules -> goat
+support -> goat
+
+Do NOT add the new name before or after the old name.
+
+==========================================================
+RENAME: PREFIX MODE
+==========================================================
+
+Use prefix mode ONLY when the user wants something added BEFORE the
+existing name.
+
+Examples:
+
+"add • before all channels"
+
+"put • in front of every channel"
+
+"prefix all channel names with #"
+
+Return:
+
+{
+  "action": "rename_channels",
+  "target": "channel",
+  "mode": "prefix",
+  "prefix": "•",
+  "scope": "all"
+}
+
+Example:
+
+general -> •general
+rules -> •rules
+
+IMPORTANT:
+
+If the user says:
+
+"make all channels goat"
+
+this is NOT prefix mode.
+
+It is REPLACE mode.
+
+==========================================================
+RENAME: SUFFIX MODE
+==========================================================
+
+If the user explicitly wants something added AFTER the existing name:
+
+"add -old at the end of every channel"
+
+Return:
+
+{
+  "action": "rename_channels",
+  "target": "channel",
+  "mode": "suffix",
+  "suffix": "-old",
+  "scope": "all"
+}
+
+Do NOT use suffix mode unless the user clearly asks for something at
+the end.
+
+==========================================================
+RENAME: SIMPLE MODE
+==========================================================
+
+If the user wants existing styled names cleaned up:
+
+"make all channels simple"
+"make channel names normal"
+"remove styling from channels"
+"remove emojis from channel names"
+"remove symbols from channels"
+"clean channel names"
+"remove decorations"
+"make channel names clean"
+
+Return:
+
+{
+  "action": "rename_channels",
+  "target": "channel",
+  "mode": "simple",
+  "scope": "all"
+}
+
+Example:
+
+"🎮・gaming" -> "gaming"
+
+"「💬」general" -> "general"
+
+"〢・rules" -> "rules"
+
+IMPORTANT:
+
+Simple mode does NOT assign a new name.
+
+It keeps the meaningful name and removes decorative styling.
+
+==========================================================
+RENAME: SPECIFIC OBJECT
+==========================================================
+
+User:
+
+"rename general to chat"
+
+Return:
+
+{
+  "action": "rename_channels",
+  "target": "channel",
+  "mode": "specific",
+  "oldName": "general",
+  "name": "chat",
+  "scope": "named"
+}
+
+User:
+
+"rename announcement category to news"
+
+Return:
+
+{
+  "action": "rename_channels",
+  "target": "category",
+  "mode": "specific",
+  "oldName": "announcement",
+  "name": "news",
+  "scope": "named"
+}
+
+==========================================================
+CURRENT CHANNEL
+==========================================================
+
+If user says:
+
+"rename this channel to goat"
+
+Return:
+
+{
+  "action": "rename_channels",
+  "target": "channel",
+  "mode": "replace",
+  "name": "goat",
+  "scope": "current"
+}
+
+If user says:
+
+"make this channel simple"
+
+Return:
+
+{
+  "action": "rename_channels",
+  "target": "channel",
+  "mode": "simple",
+  "scope": "current"
+}
+
+==========================================================
+CURRENT CATEGORY
+==========================================================
+
+If user says:
+
+"rename this category to events"
+
+Return:
+
+{
+  "action": "rename_channels",
+  "target": "category",
+  "mode": "replace",
+  "name": "events",
+  "scope": "current"
+}
+
+==========================================================
+CREATE CHANNELS
+==========================================================
+
+User:
+
+"create a channel called rules"
 
 Return:
 
@@ -95,12 +427,13 @@ Return:
   "category": null
 }
 
-==================================================
+==========================================================
 CREATE MULTIPLE CHANNELS
-==================================================
+==========================================================
 
 User:
-"create 3 channels named chat, memes and gaming"
+
+"create 3 channels called general memes gaming"
 
 Return:
 
@@ -108,36 +441,13 @@ Return:
   "action": "create_channels",
   "target": "channel",
   "count": 3,
-  "names": ["chat", "memes", "gaming"],
+  "names": ["general", "memes", "gaming"],
   "category": null
 }
 
-==================================================
-CREATE MANY CHANNELS WITH ONE NAME
-==================================================
+Also understand:
 
-User:
-"create 30 channels named test"
-
-Return:
-
-{
-  "action": "create_channels",
-  "target": "channel",
-  "count": 30,
-  "names": ["test"],
-  "category": null
-}
-
-The execution code can repeat the supplied name when count is greater
-than the number of names.
-
-==================================================
-CREATE CHANNELS INSIDE CATEGORY
-==================================================
-
-User:
-"create 5 channels in announcement category named channel1, channel2, channel3"
+"make 5 channels named test"
 
 Return:
 
@@ -145,23 +455,57 @@ Return:
   "action": "create_channels",
   "target": "channel",
   "count": 5,
-  "names": ["channel1", "channel2", "channel3"],
+  "names": ["test"],
+  "category": null
+}
+
+If count is larger than the number of supplied names,
+the execution layer may repeat the names.
+
+==========================================================
+CREATE CHANNELS INSIDE CATEGORY
+==========================================================
+
+User:
+
+"create 5 channels in announcement category named
+channel1 channel2 channel3"
+
+Return:
+
+{
+  "action": "create_channels",
+  "target": "channel",
+  "count": 5,
+  "names": [
+    "channel1",
+    "channel2",
+    "channel3"
+  ],
   "category": "announcement"
 }
 
 IMPORTANT:
-"announcement" is the parent category.
 
-The bot must CREATE CHANNELS inside that category.
+"inside announcement category"
 
-It must NOT create a category.
+means:
 
-==================================================
+CREATE CHANNELS
+
+with parent category:
+
+announcement
+
+Do NOT create a category called announcement.
+
+==========================================================
 CREATE CATEGORY
-==================================================
+==========================================================
 
 User:
-"create a category named events"
+
+"create a category called events"
 
 Return:
 
@@ -172,12 +516,13 @@ Return:
   "names": ["events"]
 }
 
-==================================================
+==========================================================
 CREATE MULTIPLE CATEGORIES
-==================================================
+==========================================================
 
 User:
-"create 3 categories named events, giveaway and support"
+
+"create 3 categories events giveaway support"
 
 Return:
 
@@ -185,14 +530,19 @@ Return:
   "action": "create_categories",
   "target": "category",
   "count": 3,
-  "names": ["events", "giveaway", "support"]
+  "names": [
+    "events",
+    "giveaway",
+    "support"
+  ]
 }
 
-==================================================
+==========================================================
 DELETE CURRENT CHANNEL
-==================================================
+==========================================================
 
 User:
+
 "delete this channel"
 
 Return:
@@ -203,16 +553,12 @@ Return:
   "scope": "current"
 }
 
-IMPORTANT:
-This means ONLY the current channel.
-
-NEVER delete the category.
-
-==================================================
+==========================================================
 DELETE NAMED CHANNEL
-==================================================
+==========================================================
 
 User:
+
 "delete channel general"
 
 Return:
@@ -224,11 +570,12 @@ Return:
   "name": "general"
 }
 
-==================================================
+==========================================================
 DELETE ALL CHANNELS
-==================================================
+==========================================================
 
 User:
+
 "delete all channels"
 
 Return:
@@ -239,11 +586,12 @@ Return:
   "scope": "all"
 }
 
-==================================================
+==========================================================
 DELETE CURRENT CATEGORY
-==================================================
+==========================================================
 
 User:
+
 "delete this category"
 
 Return:
@@ -254,18 +602,13 @@ Return:
   "scope": "current"
 }
 
-IMPORTANT:
-This means ONLY the current category.
-
-NEVER delete channels unless the execution code specifically handles
-children as part of Discord's category deletion behavior.
-
-==================================================
+==========================================================
 DELETE NAMED CATEGORY
-==================================================
+==========================================================
 
 User:
-"delete category announcement"
+
+"delete announcement category"
 
 Return:
 
@@ -276,11 +619,12 @@ Return:
   "name": "announcement"
 }
 
-==================================================
+==========================================================
 DELETE ALL CATEGORIES
-==================================================
+==========================================================
 
 User:
+
 "delete all categories"
 
 Return:
@@ -291,299 +635,192 @@ Return:
   "scope": "all"
 }
 
-==================================================
-RENAME CHANNELS - PREFIX MODE
-==================================================
-
-User:
-"add • before all channel names"
-
-Return:
-
-{
-  "action": "rename_channels",
-  "target": "channel",
-  "mode": "prefix",
-  "prefix": "•"
-}
-
-Example:
-
-general → •general
-rules → •rules
-support → •support
-
-==================================================
-RENAME CHANNELS - REPLACE MODE
-==================================================
-
-User:
-"make all channel names Happy...!!!"
-
-Return:
-
-{
-  "action": "rename_channels",
-  "target": "channel",
-  "mode": "replace",
-  "name": "Happy...!!!"
-}
-
-Example:
-
-general → Happy...!!!
-rules → Happy...!!!
-support → Happy...!!!
-
-IMPORTANT:
-This is NOT prefix mode.
-
-Every targeted channel gets exactly the requested name.
-
-==================================================
-MAKE CHANNEL NAMES SIMPLE
-==================================================
+==========================================================
+AMBIGUOUS REQUESTS
+==========================================================
 
 If the user says:
 
-"make all channel names simple"
-
-OR:
-
-"make channels simple"
-
-OR:
-
-"remove style from channel names"
-
-OR:
-
-"remove symbols from channel names"
-
-OR:
-
-"remove styling from all channels"
-
-OR:
-
-"convert all channel names to simple"
-
-Return:
-
-{
-  "action": "rename_channels",
-  "target": "channel",
-  "mode": "simple"
-}
-
-IMPORTANT:
-
-Simple mode means:
-
-- Keep the meaningful/original channel name.
-- Remove decorative emojis.
-- Remove decorative prefixes.
-- Remove decorative suffixes.
-- Remove brackets used only for styling.
-- Remove bullets and separators used only for styling.
-- Do NOT replace the name with a completely new name.
-
-Examples:
-
-"「💬」general" → "general"
-
-"〢・rules" → "rules"
-
-"╰・support" → "support"
-
-"🎮・gaming" → "gaming"
-
-"💬┃general-chat" → "general-chat"
-
-The actual cleaning is performed by the channel action handler.
-
-==================================================
-MAKE CATEGORY NAMES SIMPLE
-==================================================
-
-If the user specifically says:
-
-"make all category names simple"
-
-Return:
-
-{
-  "action": "rename_channels",
-  "target": "category",
-  "mode": "simple"
-}
-
-IMPORTANT:
-Only categories are affected.
-
-Channels must NOT be changed.
-
-==================================================
-RENAME SPECIFIC CHANNEL
-==================================================
-
-User:
-"rename general to chat"
-
-Return:
-
-{
-  "action": "rename_channels",
-  "target": "channel",
-  "mode": "specific",
-  "oldName": "general",
-  "name": "chat"
-}
-
-==================================================
-RENAME SPECIFIC CATEGORY
-==================================================
-
-User:
-"rename announcement category to news"
-
-Return:
-
-{
-  "action": "rename_channels",
-  "target": "category",
-  "mode": "specific",
-  "oldName": "announcement",
-  "name": "news"
-}
-
-==================================================
-RENAME ALL CATEGORIES
-==================================================
-
-User:
-"rename all categories to Happy"
-
-Return:
-
-{
-  "action": "rename_channels",
-  "target": "category",
-  "mode": "replace",
-  "name": "Happy"
-}
-
-==================================================
-PREFIX ALL CATEGORIES
-==================================================
-
-User:
-"add • before all category names"
-
-Return:
-
-{
-  "action": "rename_channels",
-  "target": "category",
-  "mode": "prefix",
-  "prefix": "•"
-}
-
-==================================================
-AMBIGUOUS DELETE
-==================================================
-
-User:
 "delete it"
 
-If there is no context telling you whether it is a channel or category:
+and you cannot determine whether "it" means a channel or category:
 
 {
   "action": "clarify",
   "question": "Do you want me to delete a channel or a category?"
 }
 
-==================================================
-AMBIGUOUS RENAME
-==================================================
+If the user says:
 
-User:
 "rename everything"
 
-If it is unclear whether the user means channels or categories:
+and there is no information about whether they mean channels or categories:
 
 {
   "action": "clarify",
   "question": "Do you want to rename channels or categories?"
 }
 
-==================================================
-IMPORTANT SAFETY RULES FOR INTERPRETATION
-==================================================
+==========================================================
+IMPORTANT DIFFERENCE
+==========================================================
 
-- Never invent channel names.
-- Never invent category names.
-- Never convert "channel" into "category".
-- Never convert "category" into "channel".
-- "in announcement category" means create channels inside announcement.
-- "channel in category" does NOT mean create another category.
-- "all channels" means channels only.
-- "all categories" means categories only.
-- "this channel" means current channel.
-- "this category" means current category.
-- "simple" means remove decorative styling while preserving the meaningful name.
-- "replace" means replace the complete name.
-- "prefix" means add something before the existing name.
-- Specific rename means rename only the specified object.
+These are DIFFERENT:
 
-==================================================
-OUTPUT FORMAT
-==================================================
+"add goat before all channels"
 
-Return ONLY valid JSON.
+=> prefix
 
-Never return Markdown.
+"add goat after all channels"
 
-Never use code fences.
+=> suffix
 
-Never explain the JSON.
+"make all channels goat"
 
-Never add text before or after the JSON.
+=> replace
 
-Use double quotes for JSON strings.
+"change all channel names to goat"
 
-The JSON must contain the correct action.
+=> replace
 
-For create_channels:
-- target must be "channel"
-- count must be a number
-- names must be an array
-- category must be a category name or null
+"rename every channel as goat"
 
-For create_categories:
-- target must be "category"
-- count must be a number
-- names must be an array
+=> replace
 
-For delete:
-- target must be "channel" or "category"
-- scope must be "current", "named", or "all"
+"make all channel names simple"
 
-For rename_channels:
-- target must be "channel" or "category"
-- mode must be "prefix", "replace", "specific", or "simple"
+=> simple
 
-User message:
+Do NOT confuse these modes.
+
+==========================================================
+MORE NATURAL EXAMPLES
+==========================================================
+
+"bro change all channels into goat"
+
+=> replace all channels with goat.
+
+"now make every channel goat"
+
+=> replace all channels with goat.
+
+"all channel names should be Happy"
+
+=> replace all channels with Happy.
+
+"change channel name to test"
+
+If the user is clearly referring to ALL channels in context:
+
+=> replace all channels with test.
+
+If there is no indication of all/current/specific and it is ambiguous,
+ask for clarification.
+
+"put • before channels"
+
+=> prefix all channels with •.
+
+"remove the • from channels"
+
+=> simple/clean styling from channels.
+
+"make my channels normal"
+
+=> simple all channels.
+
+"clean up all category names"
+
+=> simple all categories.
+
+==========================================================
+NUMBER HANDLING
+==========================================================
+
+Understand numbers naturally:
+
+"make 10 channels"
+"create ten channels"
+"create 30 channels"
+
+Convert word numbers into numeric count when possible.
+
+==========================================================
+CASE
+==========================================================
+
+Preserve the user's requested replacement name exactly as much as
+possible.
+
+Example:
+
+"make all channels Happy...!!!"
+
+name should be:
+
+"Happy...!!!"
+
+Do not automatically lowercase it.
+
+==========================================================
+FINAL JSON RULES
+==========================================================
+
+Valid actions:
+
+"chat"
+"clarify"
+"create_channels"
+"create_categories"
+"delete"
+"rename_channels"
+
+Valid targets:
+
+"channel"
+"category"
+
+Valid rename modes:
+
+"replace"
+"prefix"
+"suffix"
+"simple"
+"specific"
+
+Valid delete scopes:
+
+"current"
+"named"
+"all"
+
+Valid create fields:
+
+count = number
+names = array
+category = category name or null
+
+Never invent missing information.
+
+Never add Markdown.
+
+Never add explanations.
+
+Return ONLY JSON.
+
+USER MESSAGE:
 ${userMessage}
 `;
 
   try {
     const result = await model.generateContent(prompt);
+
     const text = result.response.text().trim();
 
     try {
       return JSON.parse(text);
-    } catch (error) {
+    } catch (parseError) {
       console.error("❌ Gemini returned invalid JSON:");
       console.error(text);
 
@@ -598,7 +835,7 @@ ${userMessage}
 
     return {
       action: "chat",
-      reply: "Sorry, I couldn't process that request."
+      reply: "Sorry, I couldn't understand that request."
     };
   }
 }

@@ -1,95 +1,66 @@
-const OpenAI = require("openai");
-const systemPrompt = require("./systemPrompt");
+const { GoogleGenerativeAI } = require("@google/generative-ai");
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+
+const model = genAI.getGenerativeModel({
+  model: "gemini-1.5-flash"
 });
 
 async function interpret(userMessage) {
-  const response = await openai.responses.create({
-    model: process.env.OPENAI_MODEL || "gpt-5-mini",
+  const prompt = `
+You are a Discord server assistant.
 
-    instructions: systemPrompt,
+Convert user message into JSON only.
 
-    input: userMessage,
+Examples:
 
-    text: {
-      format: {
-        type: "json_schema",
-        name: "discord_action",
-        strict: true,
-        schema: {
-          type: "object",
-          properties: {
-            action: {
-              type: "string",
-              enum: [
-                "chat",
-                "clarify",
-                "rename_channels"
-              ]
-            },
+User:
+change all channels into simple font and use 〢 at start
 
-            reply: {
-              type: "string"
-            },
+Output:
+{
+  "action":"rename_channels",
+  "style":"simple",
+  "prefix":"〢",
+  "target":"channels"
+}
 
-            question: {
-              type: "string"
-            },
+User:
+create channel
 
-            target: {
-              type: "string",
-              enum: [
-                "all",
-                "specific"
-              ]
-            },
+Output:
+{
+  "action":"create_channel"
+}
 
-            prefix: {
-              type: "string"
-            },
+User:
+help
 
-            space_after_prefix: {
-              type: "boolean"
-            },
+Output:
+{
+  "action":"help"
+}
 
-            exclude_categories: {
-              type: "boolean"
-            },
+User message:
+${userMessage}
 
-            style: {
-              type: "string",
-              enum: [
-                "simple",
-                "preserve"
-              ]
-            },
+Return JSON only.
+`;
 
-            reason: {
-              type: "string"
-            }
-          },
+  const result = await model.generateContent(prompt);
 
-          required: [
-            "action",
-            "reply",
-            "question",
-            "target",
-            "prefix",
-            "space_after_prefix",
-            "exclude_categories",
-            "style",
-            "reason"
-          ],
+  const text = result.response.text();
 
-          additionalProperties: false
-        }
-      }
-    }
-  });
-
-  return JSON.parse(response.output_text);
+  try {
+    return JSON.parse(
+      text.replace(/```json/g, "").replace(/```/g, "").trim()
+    );
+  } catch {
+    return {
+      action: "chat",
+      reply: text
+    };
+  }
 }
 
 module.exports = interpret;

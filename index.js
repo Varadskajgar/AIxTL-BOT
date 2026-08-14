@@ -20,11 +20,6 @@ if (!process.env.DISCORD_TOKEN) {
   process.exit(1);
 }
 
-if (!process.env.OPENAI_API_KEY) {
-  console.error("❌ OPENAI_API_KEY is missing.");
-  process.exit(1);
-}
-
 // ==========================================
 // WEB SERVER FOR RENDER FREE WEB SERVICE
 // ==========================================

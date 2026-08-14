@@ -1,4 +1,4 @@
-const { GoogleGenAI } = require("@google/genai");
+const { GoogleGenerativeAI } = require("@google/generative-ai");
 
 const apiKey = process.env.GEMINI_API_KEY;
 
@@ -6,25 +6,34 @@ if (!apiKey) {
     throw new Error("GEMINI_API_KEY is missing.");
 }
 
-const ai = new GoogleGenAI({
-    apiKey: apiKey
+const genAI = new GoogleGenerativeAI(apiKey);
+
+const model = genAI.getGenerativeModel({
+    model: "gemini-2.5-flash"
 });
 
 async function interpret(message) {
     const prompt = `
-You are an AI assistant inside a Discord server.
+You are an AI Discord server assistant.
 
-Your job is to understand natural-language Discord management requests.
+Understand the user's normal conversational request and convert it into JSON.
 
 User request:
 "${message}"
 
-Return a clear JSON object describing what the user wants.
+Rules:
+- "channel" means Discord channels only.
+- "category" means Discord categories only.
+- "all channels" must NEVER include categories.
+- Understand normal conversational language.
+- Understand spelling mistakes.
+- Do not execute anything.
+- Return ONLY valid JSON.
 
-For example:
+Example:
 
 User:
-"change all channel in simple font and use this first 〢"
+change all channel in simple font and use this first 〢 on all channels
 
 Return:
 {
@@ -34,27 +43,23 @@ Return:
   "prefix": "〢",
   "style": "simple"
 }
-
-Important:
-- "channel" means channels, NOT categories.
-- "category" means categories.
-- If the user says "all channels", never include categories.
-- Understand normal conversational language.
-- Do not perform the action yourself.
-- Return ONLY valid JSON.
 `;
 
-    const response = await ai.models.generateContent({
-        model: "gemini-3.6-flash",
-        contents: prompt
-    });
+    const result = await model.generateContent(prompt);
 
-    const text = response.text.trim();
+    let text = result.response.text().trim();
+
+    text = text
+        .replace(/^```json\s*/i, "")
+        .replace(/^```\s*/i, "")
+        .replace(/\s*```$/i, "")
+        .trim();
 
     try {
         return JSON.parse(text);
-    } catch {
-        throw new Error("Gemini returned invalid JSON: " + text);
+    } catch (error) {
+        console.error("Gemini returned invalid JSON:", text);
+        throw new Error("Gemini returned invalid JSON.");
     }
 }
 

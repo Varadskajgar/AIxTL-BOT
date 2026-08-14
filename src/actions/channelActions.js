@@ -8,7 +8,74 @@ const {
 } = require("discord.js");
 
 // ======================================================
-// SMALL-CAP / FANCY UNICODE → NORMAL LETTERS
+// HISTORY
+// ======================================================
+
+// In-memory history.
+// This survives an undo during the current bot session.
+// A database can be added later for permanent recovery.
+
+if (!global.aixHistory) {
+  global.aixHistory = new Map();
+}
+
+function getHistory(guildId) {
+
+  if (!global.aixHistory.has(guildId)) {
+    global.aixHistory.set(guildId, []);
+  }
+
+  return global.aixHistory.get(guildId);
+}
+
+function saveHistory(guildId, entry) {
+
+  const history =
+    getHistory(guildId);
+
+  history.push(entry);
+
+  // Keep last 20 operations
+  if (history.length > 20) {
+    history.shift();
+  }
+}
+
+// ======================================================
+// PERMISSION
+// ======================================================
+
+function checkPermissions(message) {
+
+  if (
+    !message.member.permissions.has(
+      PermissionsBitField.Flags.ManageChannels
+    )
+  ) {
+
+    return "❌ You need **Manage Channels** permission.";
+
+  }
+
+  const bot =
+    message.guild.members.me;
+
+  if (
+    !bot ||
+    !bot.permissions.has(
+      PermissionsBitField.Flags.ManageChannels
+    )
+  ) {
+
+    return "❌ I need **Manage Channels** permission.";
+
+  }
+
+  return null;
+}
+
+// ======================================================
+// SIMPLE NAME
 // ======================================================
 
 const fancyMap = {
@@ -34,723 +101,163 @@ const fancyMap = {
   "ᴜ": "u",
   "ᴠ": "v",
   "ᴡ": "w",
-  "x": "x",
   "ʏ": "y",
-  "ᴢ": "z",
-
-  "ᵃ": "a",
-  "ᵇ": "b",
-  "ᶜ": "c",
-  "ᵈ": "d",
-  "ᵉ": "e",
-  "ᶠ": "f",
-  "ᵍ": "g",
-  "ʰ": "h",
-  "ⁱ": "i",
-  "ʲ": "j",
-  "ᵏ": "k",
-  "ˡ": "l",
-  "ᵐ": "m",
-  "ⁿ": "n",
-  "ᵒ": "o",
-  "ᵖ": "p",
-  "ʳ": "r",
-  "ˢ": "s",
-  "ᵗ": "t",
-  "ᵘ": "u",
-  "ᵛ": "v",
-  "ʷ": "w",
-  "ˣ": "x",
-  "ʸ": "y",
-  "ᶻ": "z"
+  "ᴢ": "z"
 };
 
-// ======================================================
-// SIMPLE NAME
-//
-// "simple" = ONLY normal readable words
-//
-// Examples:
-//
-// 〢ᴏᴡᴏ              → owo
-// 〢ᴀᴄʜɪᴠᴇᴍᴇɴᴛs    → achievements
-// 🎮・ɢᴀᴍɪɴɢ ᴠᴄ    → gaming vc
-// 「🔥」Rules        → rules
-// ━━ GENERAL ━━     → general
-//
-// Numbers are also kept.
-// ======================================================
+function simpleName(name) {
 
-function makeSimpleName(name) {
+  let result =
+    String(name || "");
 
-  let result = String(name || "");
+  result = [...result]
+    .map(c => fancyMap[c] || c)
+    .join("");
 
-  // ------------------------------------------
-  // Convert fancy Unicode letters
-  // ------------------------------------------
+  result =
+    result.toLowerCase();
 
-  result = result.replace(
-    /[ᴀ-ᴢǫʀᵃ-ᶻ]/gu,
-    char => fancyMap[char] || char
-  );
+  // ONLY normal letters, numbers and spaces
+  result =
+    result.replace(
+      /[^a-z0-9\s]/g,
+      " "
+    );
 
-  // ------------------------------------------
-  // Lowercase
-  // ------------------------------------------
-
-  result = result.toLowerCase();
-
-  // ------------------------------------------
-  // Keep ONLY:
-  //
-  // a-z
-  // 0-9
-  // spaces
-  //
-  // Everything else is removed.
-  // ------------------------------------------
-
-  result = result.replace(
-    /[^a-z0-9\s]/g,
-    " "
-  );
-
-  // ------------------------------------------
-  // Remove repeated spaces
-  // ------------------------------------------
-
-  result = result.replace(
-    /\s+/g,
-    " "
-  );
-
-  result = result.trim();
-
-  // ------------------------------------------
-  // Discord cannot have empty names
-  // ------------------------------------------
+  result =
+    result
+      .replace(/\s+/g, " ")
+      .trim();
 
   if (!result) {
     result = "channel";
   }
 
-  // Discord max channel name length
   return result.slice(0, 100);
 }
 
 // ======================================================
-// GET CHANNELS ONLY
+// TARGET FINDER
 // ======================================================
 
-function getChannels(guild) {
+function getTargets(guild, target) {
 
   return [
     ...guild.channels.cache.values()
   ].filter(channel => {
 
-    return (
-      channel.type !== ChannelType.GuildCategory &&
-      typeof channel.setName === "function" &&
-      channel.name
-    );
-
-  });
-}
-
-// ======================================================
-// GET CATEGORIES ONLY
-// ======================================================
-
-function getCategories(guild) {
-
-  return [
-    ...guild.channels.cache.values()
-  ].filter(channel => {
-
-    return (
-      channel.type === ChannelType.GuildCategory &&
-      typeof channel.setName === "function" &&
-      channel.name
-    );
-
-  });
-}
-
-// ======================================================
-// CALCULATE NEW NAME
-// ======================================================
-
-function getNewName(channel, action) {
-
-  switch (action.mode) {
-
-    // ------------------------------------------
-    // REPLACE
-    // ------------------------------------------
-
-    case "replace":
-
-      return String(
-        action.name || ""
-      )
-        .trim()
-        .slice(0, 100);
-
-    // ------------------------------------------
-    // PREFIX
-    // ------------------------------------------
-
-    case "prefix": {
-
-      const prefix =
-        String(action.prefix || "");
-
-      const separator =
-        action.space_after_prefix
-          ? " "
-          : "";
+    if (target === "channel") {
 
       return (
-        prefix +
-        separator +
-        channel.name
-      ).slice(0, 100);
-    }
-
-    // ------------------------------------------
-    // SUFFIX
-    // ------------------------------------------
-
-    case "suffix":
-
-      return (
-        channel.name +
-        String(action.suffix || "")
-      ).slice(0, 100);
-
-    // ------------------------------------------
-    // SIMPLE
-    // ------------------------------------------
-
-    case "simple":
-
-      return makeSimpleName(
-        channel.name
+        channel.type !==
+        ChannelType.GuildCategory
       );
 
-    default:
+    }
 
-      return null;
-  }
+    if (target === "category") {
+
+      return (
+        channel.type ===
+        ChannelType.GuildCategory
+      );
+
+    }
+
+    return false;
+
+  });
 }
 
 // ======================================================
-// EXECUTE CHANNEL RENAME
+// NEW NAME
 // ======================================================
 
-async function executeChannelRename(
+function calculateName(channel, action) {
+
+  if (action.mode === "replace") {
+
+    return String(
+      action.name || ""
+    )
+      .trim()
+      .slice(0, 100);
+
+  }
+
+  if (action.mode === "simple") {
+
+    return simpleName(
+      channel.name
+    );
+
+  }
+
+  if (action.mode === "prefix") {
+
+    return (
+      String(action.prefix || "") +
+      (action.space ? " " : "") +
+      channel.name
+    ).slice(0, 100);
+
+  }
+
+  return null;
+}
+
+// ======================================================
+// CONFIRMATION
+// ======================================================
+
+async function confirmAction(
   message,
-  action
+  title,
+  description,
+  callback
 ) {
 
-  // ==================================================
-  // USER PERMISSION
-  // ==================================================
-
-  if (
-    !message.member.permissions.has(
-      PermissionsBitField.Flags.ManageChannels
-    )
-  ) {
-
-    return message.reply({
-
-      content:
-        "❌ You need **Manage Channels** permission.",
-
-      allowedMentions: {
-        repliedUser: false
-      }
-
-    });
-
-  }
-
-  // ==================================================
-  // BOT PERMISSION
-  // ==================================================
-
-  const botMember =
-    message.guild.members.me;
-
-  if (
-    !botMember ||
-    !botMember.permissions.has(
-      PermissionsBitField.Flags.ManageChannels
-    )
-  ) {
-
-    return message.reply({
-
-      content:
-        "❌ I need **Manage Channels** permission.",
-
-      allowedMentions: {
-        repliedUser: false
-      }
-
-    });
-
-  }
-
-  // ==================================================
-  // CHECK ACTION
-  // ==================================================
-
-  if (!action) {
-
-    return message.reply({
-
-      content:
-        "❌ No rename action was provided.",
-
-      allowedMentions: {
-        repliedUser: false
-      }
-
-    });
-
-  }
-
-  console.log(
-    "========================================"
-  );
-
-  console.log(
-    "🔄 RENAME REQUEST"
-  );
-
-  console.log(
-    JSON.stringify(
-      action,
-      null,
-      2
-    )
-  );
-
-  console.log(
-    "========================================"
-  );
-
-  // ==================================================
-  // TARGET
-  // ==================================================
-
-  const target =
-    action.target || "channel";
-
-  let changeable = [];
-  let skipped = [];
-
-  // ==================================================
-  // CHANNEL
-  // ==================================================
-
-  if (
-    target === "channel"
-  ) {
-
-    changeable =
-      getChannels(
-        message.guild
-      );
-
-  }
-
-  // ==================================================
-  // CATEGORY
-  // ==================================================
-
-  else if (
-    target === "category"
-  ) {
-
-    changeable =
-      getCategories(
-        message.guild
-      );
-
-  }
-
-  else {
-
-    return message.reply({
-
-      content:
-        "❌ Target must be `channel` or `category`.",
-
-      allowedMentions: {
-        repliedUser: false
-      }
-
-    });
-
-  }
-
-  // ==================================================
-  // CURRENT
-  // ==================================================
-
-  if (
-    action.scope === "current"
-  ) {
-
-    if (
-      target === "channel"
-    ) {
-
-      if (
-        message.channel.type ===
-        ChannelType.GuildCategory
-      ) {
-
-        return message.reply({
-          content:
-            "❌ This is a category, not a channel.",
-          allowedMentions: {
-            repliedUser: false
-          }
-        });
-
-      }
-
-      changeable = [
-        message.channel
-      ];
-
-    }
-
-    else {
-
-      let category = null;
-
-      if (
-        message.channel.type ===
-        ChannelType.GuildCategory
-      ) {
-
-        category =
-          message.channel;
-
-      }
-
-      else if (
-        message.channel.parent
-      ) {
-
-        category =
-          message.channel.parent;
-
-      }
-
-      if (!category) {
-
-        return message.reply({
-          content:
-            "❌ No category found.",
-          allowedMentions: {
-            repliedUser: false
-          }
-        });
-
-      }
-
-      changeable = [
-        category
-      ];
-
-    }
-
-  }
-
-  // ==================================================
-  // SPECIFIC NAME
-  // ==================================================
-
-  if (
-    action.scope === "named" &&
-    action.oldName
-  ) {
-
-    const wanted =
-      action.oldName
-        .toLowerCase()
-        .trim();
-
-    const found =
-      changeable.find(
-        channel =>
-          channel.name
-            .toLowerCase()
-            === wanted
-      );
-
-    if (!found) {
-
-      return message.reply({
-
-        content:
-          `❌ ${target} **${action.oldName}** was not found.`,
-
-        allowedMentions: {
-          repliedUser: false
-        }
-
-      });
-
-    }
-
-    changeable = [
-      found
-    ];
-
-  }
-
-  // ==================================================
-  // SPECIFIC MODE
-  // ==================================================
-
-  if (
-    action.mode === "specific"
-  ) {
-
-    action.mode =
-      "replace";
-
-  }
-
-  // ==================================================
-  // CHECK MANAGEABLE
-  // ==================================================
-
-  const manageable = [];
-
-  for (
-    const channel of changeable
-  ) {
-
-    if (
-      !channel.manageable
-    ) {
-
-      skipped.push(
-        channel
-      );
-
-      continue;
-
-    }
-
-    manageable.push(
-      channel
-    );
-
-  }
-
-  changeable =
-    manageable;
-
-  // ==================================================
-  // NOTHING
-  // ==================================================
-
-  if (
-    changeable.length === 0
-  ) {
-
-    return message.reply({
-
-      content:
-        "ℹ️ There are no manageable objects to change.",
-
-      allowedMentions: {
-        repliedUser: false
-      }
-
-    });
-
-  }
-
-  // ==================================================
-  // PREVIEW
-  // ==================================================
-
-  let preview = "";
-
-  for (
-    const channel of
-    changeable.slice(0, 25)
-  ) {
-
-    const newName =
-      getNewName(
-        channel,
-        action
-      );
-
-    preview +=
-      `\`${channel.name}\` → \`${newName}\`\n`;
-
-  }
-
-  if (
-    changeable.length > 25
-  ) {
-
-    preview +=
-      `\n…and ${
-        changeable.length - 25
-      } more.`;
-
-  }
-
-  // ==================================================
-  // MODE DESCRIPTION
-  // ==================================================
-
-  let modeDescription =
-    action.mode;
-
-  if (
-    action.mode === "replace"
-  ) {
-
-    modeDescription =
-      `Replace with **${action.name}**`;
-
-  }
-
-  else if (
-    action.mode === "prefix"
-  ) {
-
-    modeDescription =
-      `Add prefix **${action.prefix}**`;
-
-  }
-
-  else if (
-    action.mode === "suffix"
-  ) {
-
-    modeDescription =
-      `Add suffix **${action.suffix}**`;
-
-  }
-
-  else if (
-    action.mode === "simple"
-  ) {
-
-    modeDescription =
-      "Remove everything except normal words and numbers";
-
-  }
-
-  // ==================================================
-  // EMBED
-  // ==================================================
-
-  const embed =
-    new EmbedBuilder()
-
-      .setTitle(
-        "🔄 Here's what I understood"
-      )
-
-      .setDescription(
-
-        `**Action:** Rename ${target}s\n` +
-
-        `**${target}s:** ${
-          changeable.length
-        }\n` +
-
-        `**Mode:** ${
-          modeDescription
-        }\n\n` +
-
-        preview
-
-      )
-
-      .setFooter({
-
-        text:
-          "Nothing will change until you press Agree."
-
-      });
-
-  // ==================================================
-  // BUTTONS
-  // ==================================================
-
-  const buttons =
+  const row =
     new ActionRowBuilder()
       .addComponents(
 
         new ButtonBuilder()
-
           .setCustomId(
-            `channel_rename_agree_${message.author.id}`
+            `aix_yes_${message.author.id}`
           )
-
-          .setLabel(
-            "Agree"
-          )
-
-          .setEmoji(
-            "✅"
-          )
-
+          .setLabel("Agree")
+          .setEmoji("✅")
           .setStyle(
             ButtonStyle.Success
           ),
 
         new ButtonBuilder()
-
           .setCustomId(
-            `channel_rename_cancel_${message.author.id}`
+            `aix_no_${message.author.id}`
           )
-
-          .setLabel(
-            "Cancel"
-          )
-
-          .setEmoji(
-            "❌"
-          )
-
+          .setLabel("Cancel")
+          .setEmoji("❌")
           .setStyle(
             ButtonStyle.Danger
           )
 
       );
 
-  // ==================================================
-  // SEND PREVIEW
-  // ==================================================
+  const embed =
+    new EmbedBuilder()
+      .setTitle(title)
+      .setDescription(description)
+      .setFooter({
+        text:
+          "Nothing will happen until you press Agree."
+      });
 
   const reply =
     await message.reply({
 
-      embeds: [
-        embed
-      ],
+      embeds: [embed],
 
-      components: [
-        buttons
-      ],
+      components: [row],
 
       allowedMentions: {
         repliedUser: false
@@ -758,29 +265,14 @@ async function executeChannelRename(
 
     });
 
-  // ==================================================
-  // BUTTON COLLECTOR
-  // ==================================================
-
   const collector =
     reply.createMessageComponentCollector({
-
-      time:
-        60_000
-
+      time: 60_000
     });
-
-  // ==================================================
-  // BUTTON CLICK
-  // ==================================================
 
   collector.on(
     "collect",
     async interaction => {
-
-      // ----------------------------------------------
-      // WRONG USER
-      // ----------------------------------------------
 
       if (
         interaction.user.id !==
@@ -792,20 +284,15 @@ async function executeChannelRename(
           content:
             "❌ Only the person who requested this can confirm it.",
 
-          ephemeral:
-            true
+          ephemeral: true
 
         });
 
       }
 
-      // ==================================================
-      // CANCEL
-      // ==================================================
-
       if (
         interaction.customId ===
-        `channel_rename_cancel_${message.author.id}`
+        `aix_no_${message.author.id}`
       ) {
 
         await interaction.deferUpdate();
@@ -814,7 +301,7 @@ async function executeChannelRename(
           "cancelled"
         );
 
-        await reply.edit({
+        return reply.edit({
 
           content:
             "❌ Cancelled. Nothing was changed.",
@@ -825,17 +312,11 @@ async function executeChannelRename(
 
         });
 
-        return;
-
       }
-
-      // ==================================================
-      // AGREE
-      // ==================================================
 
       if (
         interaction.customId ===
-        `channel_rename_agree_${message.author.id}`
+        `aix_yes_${message.author.id}`
       ) {
 
         await interaction.deferUpdate();
@@ -843,7 +324,7 @@ async function executeChannelRename(
         await reply.edit({
 
           content:
-            "⏳ Changing names...",
+            "⏳ Working...",
 
           embeds: [],
 
@@ -851,260 +332,61 @@ async function executeChannelRename(
 
         });
 
-        let changed = 0;
-        let failed = 0;
+        try {
 
-        // ==================================================
-        // ACTUAL RENAME
-        // ==================================================
+          const result =
+            await callback();
 
-        for (
-          const channel of
-          changeable
-        ) {
+          collector.stop(
+            "completed"
+          );
 
-          try {
+          return reply.edit({
 
-            const oldName =
-              channel.name;
+            content:
+              result,
 
-            const newName =
-              getNewName(
-                channel,
-                action
-              );
+            embeds: [],
 
-            // ------------------------------------------
-            // Invalid
-            // ------------------------------------------
+            components: []
 
-            if (
-              !newName
-            ) {
+          });
 
-              failed++;
-              continue;
+        } catch (error) {
 
-            }
+          console.error(error);
 
-            // ------------------------------------------
-            // Already same
-            // ------------------------------------------
+          collector.stop(
+            "error"
+          );
 
-            if (
-              oldName ===
-              newName
-            ) {
+          return reply.edit({
 
-              skipped.push(
-                channel
-              );
+            content:
+              "❌ Operation failed: " +
+              error.message,
 
-              continue;
+            embeds: [],
 
-            }
+            components: []
 
-            // ------------------------------------------
-            // SAVE OLD NAME
-            //
-            // This is useful for future UNDO support.
-            // ------------------------------------------
-
-            if (
-              !global.channelRenameHistory
-            ) {
-
-              global.channelRenameHistory =
-                new Map();
-
-            }
-
-            if (
-              !global.channelRenameHistory.has(
-                message.guild.id
-              )
-            ) {
-
-              global.channelRenameHistory.set(
-                message.guild.id,
-                []
-              );
-
-            }
-
-            global.channelRenameHistory
-              .get(
-                message.guild.id
-              )
-              .push({
-
-                channelId:
-                  channel.id,
-
-                oldName:
-                  oldName,
-
-                newName:
-                  newName,
-
-                timestamp:
-                  Date.now()
-
-              });
-
-            // ------------------------------------------
-            // RENAME
-            // ------------------------------------------
-
-            await channel.setName(
-              newName,
-              "AI channel management"
-            );
-
-            changed++;
-
-            console.log(
-              `✅ ${oldName} → ${newName}`
-            );
-
-            // ------------------------------------------
-            // Delay
-            // ------------------------------------------
-
-            await new Promise(
-              resolve =>
-                setTimeout(
-                  resolve,
-                  350
-                )
-            );
-
-          }
-
-          catch (error) {
-
-            failed++;
-
-            console.error(
-              `❌ Failed to rename ${channel.name}:`,
-              error.message
-            );
-
-          }
+          });
 
         }
-
-        collector.stop(
-          "completed"
-        );
-
-        // ==================================================
-        // RESULT
-        // ==================================================
-
-        const result =
-          new EmbedBuilder()
-
-            .setTitle(
-              "✅ Rename Complete"
-            )
-
-            .setDescription(
-              "The rename operation has finished."
-            )
-
-            .addFields(
-
-              {
-                name:
-                  "Target",
-
-                value:
-                  target,
-
-                inline:
-                  true
-              },
-
-              {
-                name:
-                  "Mode",
-
-                value:
-                  action.mode,
-
-                inline:
-                  true
-              },
-
-              {
-                name:
-                  "Changed",
-
-                value:
-                  String(changed),
-
-                inline:
-                  true
-              },
-
-              {
-                name:
-                  "Failed",
-
-                value:
-                  String(failed),
-
-                inline:
-                  true
-              },
-
-              {
-                name:
-                  "Skipped",
-
-                value:
-                  String(skipped.length),
-
-                inline:
-                  true
-              }
-
-            );
-
-        await reply.edit({
-
-          content:
-            "",
-
-          embeds: [
-            result
-          ],
-
-          components: []
-
-        });
 
       }
 
     }
   );
 
-  // ==================================================
-  // EXPIRED
-  // ==================================================
-
   collector.on(
     "end",
     async (_, reason) => {
 
       if (
-        reason !==
-        "time"
+        reason !== "time"
       ) {
-
         return;
-
       }
 
       try {
@@ -1120,18 +402,877 @@ async function executeChannelRename(
 
         });
 
-      }
-
-      catch {}
+      } catch {}
 
     }
   );
 }
 
 // ======================================================
-// EXPORT
+// RENAME
 // ======================================================
 
-module.exports = {
-  executeChannelRename
-};
+async function executeRename(
+  message,
+  action
+) {
+
+  const permissionError =
+    checkPermissions(message);
+
+  if (permissionError) {
+    return message.reply(
+      permissionError
+    );
+  }
+
+  const target =
+    action.target || "channel";
+
+  let channels =
+    getTargets(
+      message.guild,
+      target
+    );
+
+  // ------------------------------------------
+  // CURRENT
+  // ------------------------------------------
+
+  if (
+    action.scope === "current"
+  ) {
+
+    if (
+      target === "channel"
+    ) {
+
+      if (
+        message.channel.type ===
+        ChannelType.GuildCategory
+      ) {
+
+        return message.reply(
+          "❌ This is a category, not a channel."
+        );
+
+      }
+
+      channels = [
+        message.channel
+      ];
+
+    } else {
+
+      const category =
+        message.channel.type ===
+        ChannelType.GuildCategory
+          ? message.channel
+          : message.channel.parent;
+
+      if (!category) {
+
+        return message.reply(
+          "❌ I couldn't find the current category."
+        );
+
+      }
+
+      channels = [
+        category
+      ];
+
+    }
+
+  }
+
+  // ------------------------------------------
+  // NAMED
+  // ------------------------------------------
+
+  if (
+    action.scope === "named"
+  ) {
+
+    const wanted =
+      String(action.oldName || action.name || "")
+        .toLowerCase()
+        .trim();
+
+    const found =
+      channels.find(
+        c =>
+          c.name
+            .toLowerCase()
+            === wanted
+      );
+
+    if (!found) {
+
+      return message.reply(
+        `❌ I couldn't find ${target} **${wanted}**.`
+      );
+
+    }
+
+    channels = [
+      found
+    ];
+
+  }
+
+  // ------------------------------------------
+  // MANAGEABLE ONLY
+  // ------------------------------------------
+
+  const manageable =
+    channels.filter(
+      c => c.manageable
+    );
+
+  const skipped =
+    channels.length -
+    manageable.length;
+
+  if (
+    manageable.length === 0
+  ) {
+
+    return message.reply(
+      "❌ I couldn't find any manageable targets."
+    );
+
+  }
+
+  // ------------------------------------------
+  // PREVIEW
+  // ------------------------------------------
+
+  let preview = "";
+
+  for (
+    const channel of
+    manageable.slice(0, 25)
+  ) {
+
+    const newName =
+      calculateName(
+        channel,
+        action
+      );
+
+    preview +=
+      `\`${channel.name}\` → \`${newName}\`\n`;
+
+  }
+
+  if (
+    manageable.length > 25
+  ) {
+
+    preview +=
+      `\n…and ${
+        manageable.length - 25
+      } more.`;
+
+  }
+
+  await confirmAction(
+
+    message,
+
+    "🔄 Rename Confirmation",
+
+    `**Target:** ${target}s\n` +
+    `**Count:** ${manageable.length}\n` +
+    `**Mode:** ${action.mode}\n\n` +
+    preview,
+
+    async () => {
+
+      const changes = [];
+
+      let changed = 0;
+      let failed = 0;
+
+      for (
+        const channel of
+        manageable
+      ) {
+
+        const oldName =
+          channel.name;
+
+        const newName =
+          calculateName(
+            channel,
+            action
+          );
+
+        if (
+          !newName ||
+          newName === oldName
+        ) {
+          continue;
+        }
+
+        try {
+
+          await channel.setName(
+            newName,
+            "AI Discord management"
+          );
+
+          changes.push({
+            type: "rename",
+            channelId: channel.id,
+            oldName,
+            newName
+          });
+
+          changed++;
+
+          await new Promise(
+            r => setTimeout(r, 350)
+          );
+
+        } catch (error) {
+
+          failed++;
+
+          console.error(
+            `Rename failed: ${oldName}`,
+            error.message
+          );
+
+        }
+
+      }
+
+      if (changes.length) {
+
+        saveHistory(
+          message.guild.id,
+          {
+            type: "rename",
+            changes
+          }
+        );
+
+      }
+
+      return (
+        `✅ Rename complete.\n\n` +
+        `Changed: **${changed}**\n` +
+        `Failed: **${failed}**\n` +
+        `Skipped: **${skipped}**`
+      );
+
+    }
+
+  );
+}
+
+// ======================================================
+// CREATE
+// ======================================================
+
+async function executeCreate(
+  message,
+  action
+) {
+
+  const permissionError =
+    checkPermissions(message);
+
+  if (permissionError) {
+    return message.reply(
+      permissionError
+    );
+  }
+
+  const target =
+    action.target || "channel";
+
+  const count =
+    Math.max(
+      1,
+      Math.min(
+        Number(action.count) || 1,
+        100
+      )
+    );
+
+  const names =
+    Array.isArray(action.names) &&
+    action.names.length
+      ? action.names
+      : ["new-channel"];
+
+  let category = null;
+
+  if (
+    target === "channel" &&
+    action.category
+  ) {
+
+    category =
+      message.guild.channels.cache.find(
+        c =>
+          c.type ===
+          ChannelType.GuildCategory &&
+          c.name.toLowerCase() ===
+          String(action.category)
+            .toLowerCase()
+            .trim()
+      );
+
+    if (!category) {
+
+      return message.reply(
+        `❌ Category **${action.category}** was not found.`
+      );
+
+    }
+
+  }
+
+  let preview = "";
+
+  for (
+    let i = 0;
+    i < Math.min(count, 20);
+    i++
+  ) {
+
+    const name =
+      String(
+        names[i % names.length]
+      )
+        .trim()
+        .slice(0, 100);
+
+    preview +=
+      `\`${name}\`\n`;
+
+  }
+
+  if (count > 20) {
+
+    preview +=
+      `\n…and ${
+        count - 20
+      } more.`;
+
+  }
+
+  await confirmAction(
+
+    message,
+
+    "➕ Create Confirmation",
+
+    `**Target:** ${target}\n` +
+    `**Count:** ${count}\n` +
+    `**Category:** ${
+      category
+        ? category.name
+        : "None"
+    }\n\n` +
+    preview,
+
+    async () => {
+
+      const created = [];
+
+      let failed = 0;
+
+      for (
+        let i = 0;
+        i < count;
+        i++
+      ) {
+
+        const name =
+          String(
+            names[i % names.length]
+          )
+            .trim()
+            .slice(0, 100);
+
+        try {
+
+          const channel =
+            await message.guild.channels.create({
+
+              name,
+
+              type:
+                target === "category"
+                  ? ChannelType.GuildCategory
+                  : ChannelType.GuildText,
+
+              parent:
+                target === "channel"
+                  ? category?.id || null
+                  : null,
+
+              reason:
+                "AI Discord management"
+
+            });
+
+          created.push({
+            id: channel.id,
+            name: channel.name,
+            type: target
+          });
+
+          await new Promise(
+            r => setTimeout(r, 500)
+          );
+
+        } catch (error) {
+
+          failed++;
+
+          console.error(
+            `Create failed: ${name}`,
+            error.message
+          );
+
+        }
+
+      }
+
+      if (created.length) {
+
+        saveHistory(
+          message.guild.id,
+          {
+            type: "create",
+            created
+          }
+        );
+
+      }
+
+      return (
+        `✅ Creation complete.\n\n` +
+        `Created: **${created.length}**\n` +
+        `Failed: **${failed}**`
+      );
+
+    }
+
+  );
+}
+
+// ======================================================
+// DELETE
+// ======================================================
+
+async function executeDelete(
+  message,
+  action
+) {
+
+  const permissionError =
+    checkPermissions(message);
+
+  if (permissionError) {
+    return message.reply(
+      permissionError
+    );
+  }
+
+  const target =
+    action.target || "channel";
+
+  let channels =
+    getTargets(
+      message.guild,
+      target
+    );
+
+  // ------------------------------------------
+  // CURRENT
+  // ------------------------------------------
+
+  if (
+    action.scope === "current"
+  ) {
+
+    if (
+      target === "channel"
+    ) {
+
+      if (
+        message.channel.type ===
+        ChannelType.GuildCategory
+      ) {
+
+        return message.reply(
+          "❌ This is a category, not a channel."
+        );
+
+      }
+
+      channels = [
+        message.channel
+      ];
+
+    } else {
+
+      const category =
+        message.channel.type ===
+        ChannelType.GuildCategory
+          ? message.channel
+          : message.channel.parent;
+
+      if (!category) {
+
+        return message.reply(
+          "❌ I couldn't find the current category."
+        );
+
+      }
+
+      channels = [
+        category
+      ];
+
+    }
+
+  }
+
+  // ------------------------------------------
+  // NAMED
+  // ------------------------------------------
+
+  if (
+    action.scope === "named"
+  ) {
+
+    const wanted =
+      String(action.name || "")
+        .toLowerCase()
+        .trim();
+
+    const found =
+      channels.find(
+        c =>
+          c.name
+            .toLowerCase()
+            === wanted
+      );
+
+    if (!found) {
+
+      return message.reply(
+        `❌ I couldn't find ${target} **${wanted}**.`
+      );
+
+    }
+
+    channels = [
+      found
+    ];
+
+  }
+
+  const manageable =
+    channels.filter(
+      c => c.manageable
+    );
+
+  if (
+    manageable.length === 0
+  ) {
+
+    return message.reply(
+      "❌ I couldn't find anything I can delete."
+    );
+
+  }
+
+  // ------------------------------------------
+  // SAVE INFO BEFORE DELETE
+  // ------------------------------------------
+
+  const backups =
+    manageable.map(
+      channel => ({
+
+        name:
+          channel.name,
+
+        type:
+          channel.type,
+
+        parentId:
+          channel.parentId,
+
+        topic:
+          channel.topic || null,
+
+        nsfw:
+          channel.nsfw || false,
+
+        rateLimitPerUser:
+          channel.rateLimitPerUser || 0
+
+      })
+    );
+
+  let preview =
+    manageable
+      .slice(0, 25)
+      .map(
+        c => `• ${c.name}`
+      )
+      .join("\n");
+
+  if (
+    manageable.length > 25
+  ) {
+
+    preview +=
+      `\n…and ${
+        manageable.length - 25
+      } more.`;
+
+  }
+
+  await confirmAction(
+
+    message,
+
+    "⚠️ Delete Confirmation",
+
+    `**Target:** ${target}s\n` +
+    `**Count:** ${manageable.length}\n\n` +
+    preview,
+
+    async () => {
+
+      let deleted = 0;
+      let failed = 0;
+
+      for (
+        const channel of
+        manageable
+      ) {
+
+        try {
+
+          await channel.delete(
+            "AI Discord management"
+          );
+
+          deleted++;
+
+          await new Promise(
+            r => setTimeout(r, 500)
+          );
+
+        } catch (error) {
+
+          failed++;
+
+          console.error(
+            `Delete failed: ${channel.name}`,
+            error.message
+          );
+
+        }
+
+      }
+
+      saveHistory(
+        message.guild.id,
+        {
+          type: "delete",
+          backups
+        }
+      );
+
+      return (
+        `🗑️ Delete complete.\n\n` +
+        `Deleted: **${deleted}**\n` +
+        `Failed: **${failed}**\n\n` +
+        `The deleted objects have been saved for **undo** during this bot session.`
+      );
+
+    }
+
+  );
+}
+
+// ======================================================
+// UNDO
+// ======================================================
+
+async function executeUndo(
+  message
+) {
+
+  const permissionError =
+    checkPermissions(message);
+
+  if (permissionError) {
+    return message.reply(
+      permissionError
+    );
+  }
+
+  const history =
+    getHistory(
+      message.guild.id
+    );
+
+  if (
+    history.length === 0
+  ) {
+
+    return message.reply(
+      "ℹ️ There is nothing to undo."
+    );
+
+  }
+
+  const last =
+    history.pop();
+
+  // ==================================================
+  // UNDO RENAME
+  // ==================================================
+
+  if (
+    last.type === "rename"
+  ) {
+
+    let restored = 0;
+    let failed = 0;
+
+    for (
+      const change of
+      last.changes.reverse()
+    ) {
+
+      const channel =
+        message.guild.channels.cache.get(
+          change.channelId
+        );
+
+      if (!channel) {
+        failed++;
+        continue;
+      }
+
+      try {
+
+        await channel.setName(
+          change.oldName,
+          "AI undo"
+        );
+
+        restored++;
+
+        await new Promise(
+          r => setTimeout(r, 350)
+        );
+
+      } catch {
+
+        failed++;
+
+      }
+
+    }
+
+    return message.reply(
+      `↩️ Undo complete.\n\nRestored: **${restored}**\nFailed: **${failed}**`
+    );
+
+  }
+
+  // ==================================================
+  // UNDO CREATE
+  // ==================================================
+
+  if (
+    last.type === "create"
+  ) {
+
+    let removed = 0;
+    let failed = 0;
+
+    for (
+      const item of
+      last.created
+    ) {
+
+      const channel =
+        message.guild.channels.cache.get(
+          item.id
+        );
+
+      if (!channel) {
+        continue;
+      }
+
+      try {
+
+        await channel.delete(
+          "AI undo"
+        );
+
+        removed++;
+
+        await new Promise(
+          r => setTimeout(r, 350)
+        );
+
+      } catch {
+
+        failed++;
+
+      }
+
+    }
+
+    return message.reply(
+      `↩️ Undo complete.\n\nRemoved created objects: **${removed}**\nFailed: **${failed}**`
+    );
+
+  }
+
+  // ==================================================
+  // UNDO DELETE
+  // ==================================================
+
+  if (
+    last.type === "delete"
+  ) {
+
+    let restored = 0;
+    let failed = 0;
+
+    for (
+      const backup of
+      last.backups
+    ) {
+
+      try {
+
+        const options = {
+
+          name:
+            backup.name,
+
+          type:
+            backup.type,
+
+          reason:
+        

@@ -3,66 +3,424 @@ const { GoogleGenerativeAI } = require("@google/generative-ai");
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 const model = genAI.getGenerativeModel({
-  model: "gemini-3.6-flash"
+  model: "gemini-3.6-flash",
+  generationConfig: {
+    responseMimeType: "application/json",
+    temperature: 0
+  }
 });
 
-/*
-==========================================================
-AI DISCORD COMMAND INTERPRETER
-==========================================================
+// --------------------------------------------------
+// Helpers
+// --------------------------------------------------
 
-IMPORTANT:
+function cleanText(text) {
+  return text
+    .trim()
+    .replace(/^["'`]+|["'`]+$/g, "")
+    .trim();
+}
 
-This file ONLY understands the user's intent.
+function wordNumberToNumber(value) {
+  const numbers = {
+    one: 1,
+    two: 2,
+    three: 3,
+    four: 4,
+    five: 5,
+    six: 6,
+    seven: 7,
+    eight: 8,
+    nine: 9,
+    ten: 10,
+    eleven: 11,
+    twelve: 12,
+    thirteen: 13,
+    fourteen: 14,
+    fifteen: 15,
+    sixteen: 16,
+    seventeen: 17,
+    eighteen: 18,
+    nineteen: 19,
+    twenty: 20,
+    thirty: 30,
+    forty: 40,
+    fifty: 50,
+    sixty: 60,
+    seventy: 70,
+    eighty: 80,
+    ninety: 90,
+    hundred: 100
+  };
 
-It returns structured JSON.
+  if (!value) return null;
 
-The actual Discord operation must be handled by
-channelActions.js.
+  if (/^\d+$/.test(value)) {
+    return Number(value);
+  }
 
-==========================================================
-*/
+  return numbers[value.toLowerCase()] ?? null;
+}
 
-async function interpret(userMessage) {
+// --------------------------------------------------
+// Local parser
+// --------------------------------------------------
+// This handles common commands WITHOUT Gemini.
+// This is what makes the bot reliable.
+// --------------------------------------------------
+
+function parseLocally(userMessage) {
+  const original = userMessage.trim();
+  const text = original.toLowerCase();
+
+  // ----------------------------------------------
+  // TARGET
+  // ----------------------------------------------
+
+  let target = null;
+
+  if (
+    /\b(categories|category)\b/.test(text)
+  ) {
+    target = "category";
+  } else if (
+    /\b(channels|channel)\b/.test(text)
+  ) {
+    target = "channel";
+  }
+
+  // ----------------------------------------------
+  // SIMPLE
+  // ----------------------------------------------
+
+  if (
+    target &&
+    /\b(simple|simplify|normal|clean|cleanup|clean up)\b/.test(text) &&
+    (
+      /\bmake\b/.test(text) ||
+      /\bchange\b/.test(text) ||
+      /\brename\b/.test(text) ||
+      /\bconvert\b/.test(text) ||
+      /\bremove\b/.test(text) ||
+      /\bturn\b/.test(text)
+    )
+  ) {
+    const all =
+      /\b(all|every|each)\b/.test(text);
+
+    const current =
+      /\b(this|current)\b/.test(text);
+
+    return {
+      action: "rename_channels",
+      target,
+      mode: "simple",
+      scope: current ? "current" : all ? "all" : "all"
+    };
+  }
+
+  // ----------------------------------------------
+  // PREFIX
+  // ----------------------------------------------
+
+  const prefixMatch = original.match(
+    /(?:add|put|prefix)\s+(.+?)\s+(?:before|in front of)\s+(?:all\s+)?(?:the\s+)?(?:channel|channels|category|categories)/i
+  );
+
+  if (prefixMatch && target) {
+    return {
+      action: "rename_channels",
+      target,
+      mode: "prefix",
+      prefix: cleanText(prefixMatch[1]),
+      scope: "all"
+    };
+  }
+
+  // ----------------------------------------------
+  // SUFFIX
+  // ----------------------------------------------
+
+  const suffixMatch = original.match(
+    /(?:add|put|suffix)\s+(.+?)\s+(?:after|at the end of)\s+(?:all\s+)?(?:the\s+)?(?:channel|channels|category|categories)/i
+  );
+
+  if (suffixMatch && target) {
+    return {
+      action: "rename_channels",
+      target,
+      mode: "suffix",
+      suffix: cleanText(suffixMatch[1]),
+      scope: "all"
+    };
+  }
+
+  // ----------------------------------------------
+  // CURRENT CHANNEL/CATEGORY REPLACE
+  // ----------------------------------------------
+
+  const currentReplace = original.match(
+    /(?:change|rename|make|set)\s+(?:this|current)\s+(?:channel|category)\s+(?:name\s+)?(?:to|as|into|called)\s+(.+)/i
+  );
+
+  if (currentReplace && target) {
+    return {
+      action: "rename_channels",
+      target,
+      mode: "replace",
+      name: cleanText(currentReplace[1]),
+      scope: "current"
+    };
+  }
+
+  // ----------------------------------------------
+  // RENAME SPECIFIC OBJECT
+  // Example:
+  // rename general to chat
+  // ----------------------------------------------
+
+  const specificRename = original.match(
+    /(?:rename|change)\s+(.+?)\s+(?:channel|category)?\s*(?:to|as|into)\s+(.+)/i
+  );
+
+  if (
+    specificRename &&
+    target &&
+    !/\b(all|every|each|this|current)\b/.test(text)
+  ) {
+    return {
+      action: "rename_channels",
+      target,
+      mode: "specific",
+      oldName: cleanText(specificRename[1]),
+      name: cleanText(specificRename[2]),
+      scope: "named"
+    };
+  }
+
+  // ----------------------------------------------
+  // REPLACE ALL
+  //
+  // IMPORTANT:
+  //
+  // "change all channel name into goat"
+  // "make all channels goat"
+  // "rename every channel to goat"
+  //
+  // ALL become:
+  //
+  // mode = replace
+  // ----------------------------------------------
+
+  if (
+    target &&
+    /\b(all|every|each)\b/.test(text) &&
+    (
+      /\b(change|rename|make|set|turn|convert|update)\b/.test(text)
+    )
+  ) {
+    const patterns = [
+      /(?:to|into|as|called)\s+(.+)$/i,
+      /(?:name|names)\s+(?:to|as|into)\s+(.+)$/i
+    ];
+
+    for (const pattern of patterns) {
+      const match = original.match(pattern);
+
+      if (match) {
+        let newName = cleanText(match[1]);
+
+        // Remove common trailing conversational words.
+        newName = newName
+          .replace(/\s+(please|pls|plz)$/i, "")
+          .trim();
+
+        if (newName) {
+          return {
+            action: "rename_channels",
+            target,
+            mode: "replace",
+            name: newName,
+            scope: "all"
+          };
+        }
+      }
+    }
+  }
+
+  // ----------------------------------------------
+  // "make all channels goat"
+  // ----------------------------------------------
+
+  const makeAll = original.match(
+    /(?:make|set|turn)\s+(?:all|every|each)\s+(?:the\s+)?(?:channel|channels|category|categories)\s+(.+)/i
+  );
+
+  if (makeAll && target) {
+    let newName = cleanText(makeAll[1]);
+
+    newName = newName
+      .replace(/^(?:name|names)\s+/i, "")
+      .replace(/^(?:to|as|into|called)\s+/i, "")
+      .trim();
+
+    if (
+      newName &&
+      !/^(simple|normal|clean)$/i.test(newName)
+    ) {
+      return {
+        action: "rename_channels",
+        target,
+        mode: "replace",
+        name: newName,
+        scope: "all"
+      };
+    }
+  }
+
+  // ----------------------------------------------
+  // DELETE CURRENT
+  // ----------------------------------------------
+
+  if (
+    /\b(delete|remove|destroy)\b/.test(text) &&
+    /\b(this|current)\b/.test(text) &&
+    target
+  ) {
+    return {
+      action: "delete",
+      target,
+      scope: "current"
+    };
+  }
+
+  // ----------------------------------------------
+  // DELETE ALL
+  // ----------------------------------------------
+
+  if (
+    /\b(delete|remove|destroy)\b/.test(text) &&
+    /\b(all|every|each)\b/.test(text) &&
+    target
+  ) {
+    return {
+      action: "delete",
+      target,
+      scope: "all"
+    };
+  }
+
+  // ----------------------------------------------
+  // DELETE NAMED
+  // ----------------------------------------------
+
+  const deleteNamed = original.match(
+    /(?:delete|remove|destroy)\s+(?:the\s+)?(?:channel|category)\s+(.+)/i
+  );
+
+  if (deleteNamed && target) {
+    return {
+      action: "delete",
+      target,
+      scope: "named",
+      name: cleanText(deleteNamed[1])
+    };
+  }
+
+  // ----------------------------------------------
+  // CREATE CATEGORY
+  // ----------------------------------------------
+
+  if (
+    target === "category" &&
+    /\b(create|make|add)\b/.test(text)
+  ) {
+    const match = original.match(
+      /(?:create|make|add)\s+(?:a\s+)?(?:new\s+)?category\s+(?:named|called|name(?:d)?|as|to)?\s*(.+)/i
+    );
+
+    if (match) {
+      return {
+        action: "create_categories",
+        target: "category",
+        count: 1,
+        names: [cleanText(match[1])]
+      };
+    }
+  }
+
+  // ----------------------------------------------
+  // CREATE CHANNELS
+  // ----------------------------------------------
+
+  if (
+    /\b(create|make|add)\b/.test(text) &&
+    /\b(channel|channels)\b/.test(text)
+  ) {
+    let count = 1;
+
+    const countMatch = original.match(
+      /(?:create|make|add)\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty)\s+(?:channel|channels)/i
+    );
+
+    if (countMatch) {
+      count = wordNumberToNumber(countMatch[1]) || 1;
+    }
+
+    let category = null;
+
+    const categoryMatch = original.match(
+      /\b(?:in|inside|under|within)\s+(?:the\s+)?(.+?)\s+category\b/i
+    );
+
+    if (categoryMatch) {
+      category = cleanText(categoryMatch[1]);
+    }
+
+    let names = [];
+
+    const namedMatch = original.match(
+      /\b(?:named|called|name(?:d)?)\s+(.+)$/i
+    );
+
+    if (namedMatch) {
+      let rawNames = namedMatch[1]
+        .replace(/\s+in\s+(?:the\s+)?(.+?)\s+category.*$/i, "")
+        .trim();
+
+      names = rawNames
+        .split(/\s*(?:,|\band\b)\s*/i)
+        .map(cleanText)
+        .filter(Boolean);
+    }
+
+    if (names.length === 0) {
+      names = ["new-channel"];
+    }
+
+    return {
+      action: "create_channels",
+      target: "channel",
+      count,
+      names,
+      category
+    };
+  }
+
+  return null;
+}
+
+// --------------------------------------------------
+// Gemini fallback
+// --------------------------------------------------
+
+async function interpretWithAI(userMessage) {
   const prompt = `
-You are the INTENT ENGINE for a Discord management bot.
+You are a Discord server management intent interpreter.
 
-Understand the user's NATURAL LANGUAGE.
+Understand natural language and return ONLY valid JSON.
 
-The user does NOT need to use formal commands.
-
-Examples:
-
-"change all channel name into goat"
-"make all channels goat"
-"rename every channel to goat"
-"bro change channels to goat"
-"can you make all channel names goat"
-
-All mean:
-
-Rename ALL CHANNELS and replace their complete names with:
-
-"goat"
-
-Your job is to understand WHAT THE USER MEANS, not just match exact
-phrases.
-
-==========================================================
-ABSOLUTE RULE
-==========================================================
-
-Return ONLY valid JSON.
-
-No Markdown.
-No code fences.
-No explanation.
-No comments.
-No text before or after JSON.
-
-==========================================================
-AVAILABLE ACTIONS
-==========================================================
+Possible actions:
 
 chat
 clarify
@@ -71,178 +429,50 @@ create_categories
 delete
 rename_channels
 
-==========================================================
-TARGET TYPES
-==========================================================
-
-There are only two target types:
-
-"channel"
-"category"
-
-CHANNEL and CATEGORY are completely different.
-
-If the user says:
+Targets:
 
 channel
-channels
-channel name
-channel names
-all channels
-every channel
-this channel
-
-=> target = "channel"
-
-If the user says:
-
 category
-categories
-category name
-category names
-all categories
-every category
-this category
 
-=> target = "category"
+Rename modes:
 
-NEVER convert channel into category.
-
-NEVER convert category into channel.
-
-==========================================================
-NATURAL LANGUAGE UNDERSTANDING
-==========================================================
-
-Understand:
-
-"change"
-"rename"
-"make"
-"set"
-"turn"
-"convert"
-"update"
-
-as possible rename operations when the context indicates names.
-
-Understand:
-
-"all"
-"every"
-"each"
-
-as a request to affect all matching objects.
-
-Understand informal grammar.
-
-For example:
-
-"change all channel name into goat"
-
-means:
-
-"Rename all channel names to goat."
-
-Do NOT reject the request because the grammar is imperfect.
-
-==========================================================
-RENAME: REPLACE MODE
-==========================================================
-
-If the user provides a NEW NAME and wants existing names changed to it,
-use:
-
-{
-  "action": "rename_channels",
-  "target": "channel",
-  "mode": "replace",
-  "name": "NEW NAME",
-  "scope": "all"
-}
-
-Examples:
-
-User:
-"change all channel name into goat"
-
-Return:
-
-{
-  "action": "rename_channels",
-  "target": "channel",
-  "mode": "replace",
-  "name": "goat",
-  "scope": "all"
-}
-
-User:
-"make every channel goat"
-
-Return:
-
-{
-  "action": "rename_channels",
-  "target": "channel",
-  "mode": "replace",
-  "name": "goat",
-  "scope": "all"
-}
-
-User:
-"rename all channels to Happy...!!!"
-
-Return:
-
-{
-  "action": "rename_channels",
-  "target": "channel",
-  "mode": "replace",
-  "name": "Happy...!!!",
-  "scope": "all"
-}
-
-User:
-"change all category names to events"
-
-Return:
-
-{
-  "action": "rename_channels",
-  "target": "category",
-  "mode": "replace",
-  "name": "events",
-  "scope": "all"
-}
+replace
+prefix
+suffix
+simple
+specific
 
 IMPORTANT:
 
-"replace" means the COMPLETE existing name is replaced.
+"change all channel name into goat"
+means:
 
-Example:
+{
+  "action": "rename_channels",
+  "target": "channel",
+  "mode": "replace",
+  "name": "goat",
+  "scope": "all"
+}
 
-general -> goat
-rules -> goat
-support -> goat
+"make all channels goat"
+means the same.
 
-Do NOT add the new name before or after the old name.
+"rename every channel to goat"
+means the same.
 
-==========================================================
-RENAME: PREFIX MODE
-==========================================================
+"make all channels simple"
+means:
 
-Use prefix mode ONLY when the user wants something added BEFORE the
-existing name.
-
-Examples:
+{
+  "action": "rename_channels",
+  "target": "channel",
+  "mode": "simple",
+  "scope": "all"
+}
 
 "add • before all channels"
-
-"put • in front of every channel"
-
-"prefix all channel names with #"
-
-Return:
+means:
 
 {
   "action": "rename_channels",
@@ -252,592 +482,99 @@ Return:
   "scope": "all"
 }
 
-Example:
-
-general -> •general
-rules -> •rules
-
-IMPORTANT:
-
-If the user says:
-
-"make all channels goat"
-
-this is NOT prefix mode.
-
-It is REPLACE mode.
-
-==========================================================
-RENAME: SUFFIX MODE
-==========================================================
-
-If the user explicitly wants something added AFTER the existing name:
-
-"add -old at the end of every channel"
-
-Return:
+"delete this channel"
+means:
 
 {
-  "action": "rename_channels",
+  "action": "delete",
   "target": "channel",
-  "mode": "suffix",
-  "suffix": "-old",
-  "scope": "all"
+  "scope": "current"
 }
 
-Do NOT use suffix mode unless the user clearly asks for something at
-the end.
-
-==========================================================
-RENAME: SIMPLE MODE
-==========================================================
-
-If the user wants existing styled names cleaned up:
-
-"make all channels simple"
-"make channel names normal"
-"remove styling from channels"
-"remove emojis from channel names"
-"remove symbols from channels"
-"clean channel names"
-"remove decorations"
-"make channel names clean"
-
-Return:
+"delete this category"
+means:
 
 {
-  "action": "rename_channels",
-  "target": "channel",
-  "mode": "simple",
-  "scope": "all"
-}
-
-Example:
-
-"🎮・gaming" -> "gaming"
-
-"「💬」general" -> "general"
-
-"〢・rules" -> "rules"
-
-IMPORTANT:
-
-Simple mode does NOT assign a new name.
-
-It keeps the meaningful name and removes decorative styling.
-
-==========================================================
-RENAME: SPECIFIC OBJECT
-==========================================================
-
-User:
-
-"rename general to chat"
-
-Return:
-
-{
-  "action": "rename_channels",
-  "target": "channel",
-  "mode": "specific",
-  "oldName": "general",
-  "name": "chat",
-  "scope": "named"
-}
-
-User:
-
-"rename announcement category to news"
-
-Return:
-
-{
-  "action": "rename_channels",
+  "action": "delete",
   "target": "category",
-  "mode": "specific",
-  "oldName": "announcement",
-  "name": "news",
-  "scope": "named"
-}
-
-==========================================================
-CURRENT CHANNEL
-==========================================================
-
-If user says:
-
-"rename this channel to goat"
-
-Return:
-
-{
-  "action": "rename_channels",
-  "target": "channel",
-  "mode": "replace",
-  "name": "goat",
   "scope": "current"
 }
 
-If user says:
-
-"make this channel simple"
-
-Return:
-
-{
-  "action": "rename_channels",
-  "target": "channel",
-  "mode": "simple",
-  "scope": "current"
-}
-
-==========================================================
-CURRENT CATEGORY
-==========================================================
-
-If user says:
-
-"rename this category to events"
-
-Return:
-
-{
-  "action": "rename_channels",
-  "target": "category",
-  "mode": "replace",
-  "name": "events",
-  "scope": "current"
-}
-
-==========================================================
-CREATE CHANNELS
-==========================================================
-
-User:
-
-"create a channel called rules"
-
-Return:
+"create 30 channels named test"
+means:
 
 {
   "action": "create_channels",
   "target": "channel",
-  "count": 1,
-  "names": ["rules"],
-  "category": null
-}
-
-==========================================================
-CREATE MULTIPLE CHANNELS
-==========================================================
-
-User:
-
-"create 3 channels called general memes gaming"
-
-Return:
-
-{
-  "action": "create_channels",
-  "target": "channel",
-  "count": 3,
-  "names": ["general", "memes", "gaming"],
-  "category": null
-}
-
-Also understand:
-
-"make 5 channels named test"
-
-Return:
-
-{
-  "action": "create_channels",
-  "target": "channel",
-  "count": 5,
+  "count": 30,
   "names": ["test"],
   "category": null
 }
 
-If count is larger than the number of supplied names,
-the execution layer may repeat the names.
-
-==========================================================
-CREATE CHANNELS INSIDE CATEGORY
-==========================================================
-
-User:
-
-"create 5 channels in announcement category named
-channel1 channel2 channel3"
-
-Return:
+"create 5 channels in announcement category named channel1, channel2, channel3"
+means:
 
 {
   "action": "create_channels",
   "target": "channel",
   "count": 5,
-  "names": [
-    "channel1",
-    "channel2",
-    "channel3"
-  ],
+  "names": ["channel1", "channel2", "channel3"],
   "category": "announcement"
 }
 
-IMPORTANT:
+Rules:
 
-"inside announcement category"
-
-means:
-
-CREATE CHANNELS
-
-with parent category:
-
-announcement
-
-Do NOT create a category called announcement.
-
-==========================================================
-CREATE CATEGORY
-==========================================================
+- channel means channel only.
+- category means category only.
+- all channels never includes categories.
+- all categories never includes channels.
+- replace replaces the complete name.
+- prefix adds before the existing name.
+- suffix adds after the existing name.
+- simple removes decorative styling while preserving the meaningful name.
+- Understand imperfect grammar.
+- Return JSON only.
 
 User:
-
-"create a category called events"
-
-Return:
-
-{
-  "action": "create_categories",
-  "target": "category",
-  "count": 1,
-  "names": ["events"]
-}
-
-==========================================================
-CREATE MULTIPLE CATEGORIES
-==========================================================
-
-User:
-
-"create 3 categories events giveaway support"
-
-Return:
-
-{
-  "action": "create_categories",
-  "target": "category",
-  "count": 3,
-  "names": [
-    "events",
-    "giveaway",
-    "support"
-  ]
-}
-
-==========================================================
-DELETE CURRENT CHANNEL
-==========================================================
-
-User:
-
-"delete this channel"
-
-Return:
-
-{
-  "action": "delete",
-  "target": "channel",
-  "scope": "current"
-}
-
-==========================================================
-DELETE NAMED CHANNEL
-==========================================================
-
-User:
-
-"delete channel general"
-
-Return:
-
-{
-  "action": "delete",
-  "target": "channel",
-  "scope": "named",
-  "name": "general"
-}
-
-==========================================================
-DELETE ALL CHANNELS
-==========================================================
-
-User:
-
-"delete all channels"
-
-Return:
-
-{
-  "action": "delete",
-  "target": "channel",
-  "scope": "all"
-}
-
-==========================================================
-DELETE CURRENT CATEGORY
-==========================================================
-
-User:
-
-"delete this category"
-
-Return:
-
-{
-  "action": "delete",
-  "target": "category",
-  "scope": "current"
-}
-
-==========================================================
-DELETE NAMED CATEGORY
-==========================================================
-
-User:
-
-"delete announcement category"
-
-Return:
-
-{
-  "action": "delete",
-  "target": "category",
-  "scope": "named",
-  "name": "announcement"
-}
-
-==========================================================
-DELETE ALL CATEGORIES
-==========================================================
-
-User:
-
-"delete all categories"
-
-Return:
-
-{
-  "action": "delete",
-  "target": "category",
-  "scope": "all"
-}
-
-==========================================================
-AMBIGUOUS REQUESTS
-==========================================================
-
-If the user says:
-
-"delete it"
-
-and you cannot determine whether "it" means a channel or category:
-
-{
-  "action": "clarify",
-  "question": "Do you want me to delete a channel or a category?"
-}
-
-If the user says:
-
-"rename everything"
-
-and there is no information about whether they mean channels or categories:
-
-{
-  "action": "clarify",
-  "question": "Do you want to rename channels or categories?"
-}
-
-==========================================================
-IMPORTANT DIFFERENCE
-==========================================================
-
-These are DIFFERENT:
-
-"add goat before all channels"
-
-=> prefix
-
-"add goat after all channels"
-
-=> suffix
-
-"make all channels goat"
-
-=> replace
-
-"change all channel names to goat"
-
-=> replace
-
-"rename every channel as goat"
-
-=> replace
-
-"make all channel names simple"
-
-=> simple
-
-Do NOT confuse these modes.
-
-==========================================================
-MORE NATURAL EXAMPLES
-==========================================================
-
-"bro change all channels into goat"
-
-=> replace all channels with goat.
-
-"now make every channel goat"
-
-=> replace all channels with goat.
-
-"all channel names should be Happy"
-
-=> replace all channels with Happy.
-
-"change channel name to test"
-
-If the user is clearly referring to ALL channels in context:
-
-=> replace all channels with test.
-
-If there is no indication of all/current/specific and it is ambiguous,
-ask for clarification.
-
-"put • before channels"
-
-=> prefix all channels with •.
-
-"remove the • from channels"
-
-=> simple/clean styling from channels.
-
-"make my channels normal"
-
-=> simple all channels.
-
-"clean up all category names"
-
-=> simple all categories.
-
-==========================================================
-NUMBER HANDLING
-==========================================================
-
-Understand numbers naturally:
-
-"make 10 channels"
-"create ten channels"
-"create 30 channels"
-
-Convert word numbers into numeric count when possible.
-
-==========================================================
-CASE
-==========================================================
-
-Preserve the user's requested replacement name exactly as much as
-possible.
-
-Example:
-
-"make all channels Happy...!!!"
-
-name should be:
-
-"Happy...!!!"
-
-Do not automatically lowercase it.
-
-==========================================================
-FINAL JSON RULES
-==========================================================
-
-Valid actions:
-
-"chat"
-"clarify"
-"create_channels"
-"create_categories"
-"delete"
-"rename_channels"
-
-Valid targets:
-
-"channel"
-"category"
-
-Valid rename modes:
-
-"replace"
-"prefix"
-"suffix"
-"simple"
-"specific"
-
-Valid delete scopes:
-
-"current"
-"named"
-"all"
-
-Valid create fields:
-
-count = number
-names = array
-category = category name or null
-
-Never invent missing information.
-
-Never add Markdown.
-
-Never add explanations.
-
-Return ONLY JSON.
-
-USER MESSAGE:
 ${userMessage}
 `;
 
   try {
     const result = await model.generateContent(prompt);
-
     const text = result.response.text().trim();
 
-    try {
-      return JSON.parse(text);
-    } catch (parseError) {
-      console.error("❌ Gemini returned invalid JSON:");
-      console.error(text);
-
-      return {
-        action: "chat",
-        reply: text
-      };
-    }
+    return JSON.parse(text);
   } catch (error) {
-    console.error("❌ Gemini API error:");
-    console.error(error);
+    console.error("AI interpreter error:", error);
 
     return {
-      action: "chat",
-      reply: "Sorry, I couldn't understand that request."
+      action: "clarify",
+      question: "I couldn't understand that. What would you like me to do?"
     };
   }
+}
+
+// --------------------------------------------------
+// Main interpreter
+// --------------------------------------------------
+
+async function interpret(userMessage) {
+  // First use deterministic local parsing.
+  // This handles common commands reliably.
+  const localResult = parseLocally(userMessage);
+
+  if (localResult) {
+    console.log("🧠 Local interpretation:", localResult);
+    return localResult;
+  }
+
+  // If local parser cannot understand it,
+  // use Gemini for natural conversation.
+  const aiResult = await interpretWithAI(userMessage);
+
+  console.log("🤖 AI interpretation:", aiResult);
+
+  return aiResult;
 }
 
 module.exports = interpret;

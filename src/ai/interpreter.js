@@ -16,4 +16,4 @@ async function interpret(message) {
     return result.response.text();
 }
 
-module.exports = interpret;
+module.exports = interpret; 
